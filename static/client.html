@@ -1321,7 +1321,7 @@
         function formatMessage(text, isStreaming = false) {
             let processed = text;
 
-            // 1. Extract and render <Thinking> blocks
+            // 1a. Extract and render <Thinking>...</Thinking> blocks
             processed = processed.replace(/<Thinking>([\s\S]*?)<\/Thinking>/gi, (match, content) => {
                 const bodyHtml = formatThinkingContent(content.trim());
                 return `<div class="reasoning-block collapsed">
@@ -1331,7 +1331,7 @@
                 </div>`;
             });
 
-            // 2. Handle incomplete <Thinking> during streaming (show as live thinking)
+            // 1b. Handle incomplete <Thinking> during streaming (show as live thinking)
             if (isStreaming && processed.includes('<Thinking>') && !processed.includes('</Thinking>')) {
                 processed = processed.replace(/<Thinking>([\s\S]*)$/gi, (match, content) => {
                     const bodyHtml = formatThinkingContent(content.trim());
@@ -1344,6 +1344,35 @@
                 });
             }
 
+            // 1c. Fallback: handle plain "REASONING:" prefix when model skips <Thinking> tags
+            if (!processed.includes('reasoning-block')) {
+                processed = processed.replace(/^(?:\*\*)?REASONING(?:\*\*)?:\s*([\s\S]*?)(?=\n(?:\*\*)?ANSWER(?:\*\*)?:)/im, (match, content) => {
+                    const bodyHtml = formatThinkingContent(content.trim());
+                    return `<div class="reasoning-block collapsed">
+                        <div class="reasoning-title">🧠 CORE REASONING</div>
+                        <div class="reasoning-body">${bodyHtml}</div>
+                        <button class="reasoning-toggle" onclick="toggleReasoning(this)">▼ Show full analysis</button>
+                    </div>`;
+                });
+                // Also handle streaming: REASONING: without ANSWER: yet
+                if (isStreaming && /^(?:\*\*)?REASONING(?:\*\*)?:/im.test(processed) && !/(?:\*\*)?ANSWER(?:\*\*)?:/im.test(processed)) {
+                    processed = processed.replace(/^(?:\*\*)?REASONING(?:\*\*)?:\s*([\s\S]*)$/im, (match, content) => {
+                        const bodyHtml = formatThinkingContent(content.trim());
+                        return `<div class="reasoning-block">
+                            <div class="reasoning-title">🧠 ANALYZING
+                                <div class="thinking-dots"><span></span><span></span><span></span></div>
+                            </div>
+                            <div class="reasoning-body">${bodyHtml}</div>
+                        </div>`;
+                    });
+                }
+            }
+
+            // 2. Render section labels (ANSWER:, CONTEXT:, SOURCE:, CONFIDENCE:, NOTES:)
+            processed = processed.replace(/^(?:\*\*)?ANSWER(?:\*\*)?:\s*/gim, '<div class="response-section"><h2>Answer</h2></div>\n');
+            processed = processed.replace(/^(?:\*\*)?CONTEXT(?:\*\*)?:\s*/gim, '<div class="response-section"><h2>Context</h2></div>\n');
+            processed = processed.replace(/^(?:\*\*)?NOTES?(?:\*\*)?:\s*/gim, '<div class="response-section"><h2>Notes</h2></div>\n');
+
             // 3. Handle Markdown tables BEFORE other transforms
             processed = renderMarkdownTables(processed);
 
@@ -1351,18 +1380,42 @@
             processed = processed.replace(/^### (.+)$/gm, '<div class="response-section"><h3>$1</h3></div>');
             processed = processed.replace(/^## (.+)$/gm, '<div class="response-section"><h2>$1</h2></div>');
 
-            // 5. Render bullet lists (consecutive lines starting with - or *)
+            // 5. Render bullet lists
             processed = renderLists(processed);
 
             // 6. Render numbered lists
             processed = renderNumberedLists(processed);
 
-            // 7. Source citations [Source: X]
+            // 7. Source citations [Source: X] and plain "SOURCE:" labels
             processed = processed.replace(/\*?\*?\[Source:\s*([^\]]+)\]\*?\*?/g,
                 '<span class="source-citation">📄 $1</span>');
+            processed = processed.replace(/^(?:\*\*)?SOURCE(?:\*\*)?:\s*(.+)$/gim, (m, content) => {
+                return `<div class="response-section"><h2>Source</h2></div>\n<span class="source-citation">📄 ${content.trim()}</span>`;
+            });
 
-            // 8. Confidence indicator
-            processed = processed.replace(/\*?\*?(?:Confidence|Konfidenz|CONFIDENCE)[\s:]*(\d+)%?\*?\*?/gi, (match, pct) => {
+            // 8. Confidence indicator — handle "CONFIDENCE: HIGH - reason" and "CONFIDENCE: 85%"
+            processed = processed.replace(/^(?:\*\*)?CONFIDENCE(?:\*\*)?:\s*(?:HIGH|HOCH|Hoch|High)\b[^<]*/gim, (match) => {
+                return `<div class="confidence-block">
+                    <span class="confidence-label">Confidence</span>
+                    <div class="confidence-bar"><div class="confidence-fill high" style="width:90%"></div></div>
+                    <span class="confidence-value high">HIGH</span>
+                </div>`;
+            });
+            processed = processed.replace(/^(?:\*\*)?CONFIDENCE(?:\*\*)?:\s*(?:MEDIUM|MITTEL|Mittel|Medium)\b[^<]*/gim, (match) => {
+                return `<div class="confidence-block">
+                    <span class="confidence-label">Confidence</span>
+                    <div class="confidence-bar"><div class="confidence-fill medium" style="width:60%"></div></div>
+                    <span class="confidence-value medium">MEDIUM</span>
+                </div>`;
+            });
+            processed = processed.replace(/^(?:\*\*)?CONFIDENCE(?:\*\*)?:\s*(?:LOW|NIEDRIG|Niedrig|Low)\b[^<]*/gim, (match) => {
+                return `<div class="confidence-block">
+                    <span class="confidence-label">Confidence</span>
+                    <div class="confidence-bar"><div class="confidence-fill low" style="width:30%"></div></div>
+                    <span class="confidence-value low">LOW</span>
+                </div>`;
+            });
+            processed = processed.replace(/(?:Confidence|Konfidenz|CONFIDENCE)[\s:]*(\d+)%?/gi, (match, pct) => {
                 const p = parseInt(pct);
                 const cls = p >= 75 ? 'high' : p >= 45 ? 'medium' : 'low';
                 return `<div class="confidence-block">
@@ -1377,7 +1430,7 @@
             processed = processed.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
             processed = processed.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
 
-            // 10. Line breaks (but not inside already-rendered HTML)
+            // 10. Line breaks
             processed = processed.replace(/\n\n/g, '<br><br>');
             processed = processed.replace(/\n/g, '<br>');
 

@@ -188,42 +188,19 @@ Action: Ask for clarification before retrieval.
 Respond ONLY with valid JSON. No markdown, no explanations outside JSON."""
 
 # Post-Retrieval: The Answer Synthesis Prompt (ENHANCED)
-POST_RETRIEVAL_SYSTEM_PROMPT = """You are an expert Corporate Knowledge Analyst. Your role is to synthesize information from retrieved document chunks into precise, actionable answers.
+POST_RETRIEVAL_SYSTEM_PROMPT = """You are BLAIQ, a Strategic Intelligence Partner for high-stakes corporate decision support.
+
+## ABSOLUTE LANGUAGE RULE — NON-NEGOTIABLE
+You MUST respond in the EXACT SAME LANGUAGE as the user's query.
+- German query → ENTIRE response in German (Thinking block, headers, answer, everything).
+- English query → ENTIRE response in English.
+- NEVER answer in English if the user writes in German.
 
 ## CORE PRINCIPLES:
-
-### 1. LANGUAGE MATCHING (MANDATORY)
-- Detect the user's query language and respond in THE SAME LANGUAGE.
-- If query is German → respond in German.
-- If query is English → respond in English.
-- The source documents may be in German, but you MUST translate insights to match the query language.
-
-### 2. PRECISION OVER VERBOSITY
-- Answer the EXACT question asked. Do not provide tangential information.
-- If a user asks "What is the budget?", give the budget, not a summary of the entire project.
-- If multiple documents contain the answer, prioritize the most recent or most authoritative.
-
-### 3. SOURCE ATTRIBUTION (ALWAYS)
-- Every factual claim MUST be linked to a source.
-- Format: "According to [Document Name], Page X, ..."
-- If information comes from multiple sources, list all.
-- Clean document names by removing hash suffixes (e.g., "_89d2d7b8" → ".pdf").
-
-### 4. HANDLING MISSING INFORMATION
-- If the answer is NOT in the provided context, say so explicitly.
-- Do NOT guess, hallucinate, or use external knowledge.
-- Suggest what additional documents might help if applicable.
-
-### 5. STRUCTURED RESPONSES
-For complex queries, use this structure:
-- **ANSWER**: Direct response to the question
-- **DETAILS**: Supporting information (if needed)
-- **SOURCES**: Document citations
-
-### 6. ENTITY AWARENESS
-- Pay attention to specific entities (people, organizations, dates, amounts).
-- When entities are mentioned, ensure your answer addresses them specifically.
-- If an entity appears in multiple documents, note any discrepancies.
+1. Answer the EXACT question. Precision over verbosity.
+2. Every factual claim MUST cite a source: [Document Name, Page X].
+3. If information is NOT in the context, say so explicitly. Never hallucinate.
+4. Use Markdown tables for comparisons, bold for key values.
 """
 
 BGE_M3_DIMENSION = 1024
@@ -253,51 +230,39 @@ If the information is not in the context, respond:
 - Example: "Contract_Siemens_2024_a1b2c3d4" -> "Contract_Siemens_2024.pdf"
 """
 
-DEFAULT_USER_PROMPT = """You are a precise document analysis assistant with self-awareness capabilities.
-
-TEXT SNIPPETS:
+DEFAULT_USER_PROMPT = """TEXT SNIPPETS:
 {context}
 
 USER QUESTION: {query}
 
-=== STEP 1: REASONING & ANALYSIS ===
-Before answering, perform this internal validation:
+=== YOUR RESPONSE MUST FOLLOW THIS EXACT FORMAT ===
 
-1. **Query Analysis**: What key elements is the user asking about?
-   - Key entities/names mentioned: [list them]
-   - Numbers/amounts referenced: [list them]
-   - Core intent: [what does the user want to know?]
+Start with a <Thinking> block containing your full chain-of-thought reasoning. This block MUST include ALL 6 steps below. Write each step thoroughly (not just one sentence). Respond IN THE SAME LANGUAGE AS THE USER'S QUESTION.
 
-2. **Evidence Check**: Scan the provided snippets for matches:
-   - Which snippets mention the key entities? [list snippet IDs or brief quotes]
-   - Do any snippets contain the exact numbers/amounts asked about?
-   - What is the context of these mentions?
+<Thinking>
+1. **Language Detection**: Identify the user's language. Confirm you will respond in that language.
+2. **Intent Analysis**: What exactly does the user need? What are the key entities, numbers, and specifics?
+3. **K – Content Accuracy**: Cross-check every fact against the source snippets. Are there contradictions between snippets? Could any value be misread or hallucinated? Which snippets contain the exact data requested?
+4. **V – Completeness & Source Integration**: Were ALL relevant snippets considered? Are there connections between different sources? Is any requested information missing from the snippets? If so, state what is missing.
+5. **R – Rhetoric & Style**: Plan the answer structure. Which sections are needed? Is a table appropriate? Will the formatting be professional and clear?
+6. **Q – Source Transparency**: Map every claim to a specific document and page number. Can the user verify every fact? List the exact sources.
+</Thinking>
 
-3. **Self-Validation**: 
-   - Does my answer DIRECTLY address the user's question?
-   - Am I making assumptions not supported by the text?
-   - If I found partial information, am I clearly stating what's missing?
+Then provide the answer:
 
-=== STEP 2: STRUCTURED ANSWER ===
+**ANSWER**: [Direct, complete answer in the user's language. Use ## headers and Markdown tables where appropriate.]
 
-Provide your response in the following format:
+**CONTEXT**: [What type of document is this? What is its purpose?]
 
-**REASONING**: [2-3 sentences explaining your analysis process - what you looked for, what you found, and how confident you are]
+**SOURCE**: Document [name.pdf], Page [X]
 
-**ANSWER**: [Your clear, direct answer addressing the user's question. If you found the information, state it clearly. If you found related but incomplete information, explain both what you found AND what's missing]
+**CONFIDENCE**: [HIGH/MEDIUM/LOW] - [Why]
 
-**CONTEXT**: [Describe the document context - what type of document is this? What is its purpose? This helps the user understand the source]
-
-**SOURCE**: Document [cleaned_name.pdf], Page [X]
-
-**CONFIDENCE**: [HIGH/MEDIUM/LOW] - [One sentence explaining why]
-
-=== IMPORTANT RULES ===
-1. ALWAYS include the REASONING section - show your thinking
-2. If the user mentions a specific number (like €36.041,66), explicitly confirm whether you found it or not
-3. Compare what the user asked vs what you found - be explicit about matches and gaps
-4. Respond in the same language as the user's question
-5. Never hallucinate - if something is not in the snippets, say so clearly
+=== RULES ===
+1. The <Thinking> block is MANDATORY. Include all 6 steps with thorough reasoning.
+2. Respond in the SAME LANGUAGE as the user's question. German query = German response.
+3. Never hallucinate. If data is not in the snippets, say so.
+4. Use Markdown tables for comparisons.
 
 YOUR RESPONSE:"""
 
@@ -351,7 +316,7 @@ def _get_openai_client():
     """Lazy-init singleton OpenAI client for BLAIQ proxy."""
     global _openai_client
     if _openai_client is None:
-        _openai_client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_API_BASE_URL)
+        _openai_client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_API_BASE_URL, max_retries=0)
     return _openai_client
 
 def _resolve_model_and_client(model: str):
@@ -360,13 +325,16 @@ def _resolve_model_and_client(model: str):
     Returns (client, model_name_without_prefix).
     """
     if "/" not in model:
-        if model.startswith("llama-") or model.startswith("mixtral-") or model.startswith("gemma"):
+        if model.startswith("llama-") or model.startswith("mixtral-") or model.startswith("gemma") or model.startswith("gpt-oss"):
             return _get_groq_client(), model
         else:
             return _get_openai_client(), model
 
     if model.startswith("groq/"):
         return _get_groq_client(), model.replace("groq/", "", 1)
+    elif model.startswith("openai/") and "gpt-oss" in model:
+        # gpt-oss models are served by Groq, not the BLAIQ proxy
+        return _get_groq_client(), model.replace("openai/", "", 1)
     else:
         # openai/ prefix or any other → BLAIQ proxy
         return _get_openai_client(), model.replace("openai/", "", 1)
@@ -384,6 +352,10 @@ def _invoke_llm(messages, model: str, **kwargs):
     kwargs.pop("api_base", None)
     kwargs.pop("api_key", None)
     kwargs.pop("stream_options", None)
+
+    # Groq does not support reasoning_effort — strip it for Groq calls
+    if isinstance(client, Groq):
+        kwargs.pop("reasoning_effort", None)
 
     try:
         if os.getenv("DEBUG_LLM", "false").lower() == "true":
@@ -456,6 +428,10 @@ def _invoke_llm_stream(messages, model: str, **kwargs):
     kwargs.pop("api_base", None)
     kwargs.pop("api_key", None)
     kwargs.pop("stream_options", None)
+
+    # Groq does not support reasoning_effort — strip it for Groq calls
+    if isinstance(client, Groq):
+        kwargs.pop("reasoning_effort", None)
 
     prompt_chars = sum(len(m.get("content", "")) for m in messages)
 
@@ -2311,9 +2287,10 @@ def generate_answer(
         content, used_model = _invoke_llm(
             messages,
             model=actual_model,
-            max_tokens=LLM_MAX_OUTPUT_TOKENS
+            max_tokens=LLM_MAX_OUTPUT_TOKENS,
+            reasoning_effort="medium"
         )
-        
+
         return content
 
     except Exception as e:
@@ -2381,7 +2358,8 @@ IMPORTANT RULES FOR {mode_upper} FORMAT:
         return _invoke_llm_stream(
             messages,
             model=actual_model,
-            max_tokens=LLM_MAX_OUTPUT_TOKENS
+            max_tokens=LLM_MAX_OUTPUT_TOKENS,
+            reasoning_effort="medium"
         )
 
     except Exception as e:
