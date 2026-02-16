@@ -1,0 +1,26 @@
+# Models and Data
+models/
+*.onnx
+*.bin
+*.pt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+env/
+venv/
+ENV/
+
+# OS/IDEs
+.DS_Store
+.vscode/
+.idea/
+
+# Temporary / Backup files
+*_old.py
+*_broken.py
+debug_status.env
+requirements_after.txt

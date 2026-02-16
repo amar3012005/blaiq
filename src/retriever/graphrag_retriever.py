@@ -31,7 +31,9 @@ Multi-Tenant Support:
 """
 
 import json
+import asyncio
 import logging
+
 import math
 import os
 import re
@@ -42,8 +44,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 from dotenv import load_dotenv
-import litellm
-from litellm import completion
+from groq import Groq
+from openai import OpenAI
 from langchain_core.documents import Document
 from neo4j import GraphDatabase
 from qdrant_client import QdrantClient
@@ -101,12 +103,13 @@ NEO4J_URI = os.getenv("NEO4J_URI") or CONFIG.get("neo4j", {}).get("uri", "bolt:/
 NEO4J_USER = os.getenv("NEO4J_USER") or CONFIG.get("neo4j", {}).get("user", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 
-# LiteLLM Configuration - Force environment values or defaults
-LITELLM_PLANNER_MODEL = os.getenv("LITELLM_PLANNER_MODEL") or "openai/gpt-4o"
-LITELLM_PRE_MODEL = os.getenv("LITELLM_PRE_MODEL") or "openai/gpt-4o-mini"
+# LLM Model Configuration (Groq / OpenAI SDK)
+LITELLM_PLANNER_MODEL = os.getenv("LITELLM_PLANNER_MODEL") or "groq/llama-3.1-8b-instant"
+LITELLM_PRE_MODEL = os.getenv("LITELLM_PRE_MODEL") or "groq/llama-3.1-8b-instant"
 LITELLM_POST_MODEL = os.getenv("LITELLM_POST_MODEL") or "openai/gpt-4o"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_API_BASE_URL = os.getenv("OPENAI_API_BASE_URL", "https://api.openai.com/v1")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "25"))
 _token_env = os.getenv("LLM_MAX_OUTPUT_TOKENS", "4000")
@@ -333,139 +336,172 @@ User's Latest Question: {query}
 Rewritten Standalone Query:"""
 
 # 260108–BundB Jun - BEGIN
-# LiteLLM Unified Invocation
+# Direct Groq + OpenAI SDK Invocation (replaces LiteLLM)
+_groq_client = None
+_openai_client = None
+
+def _get_groq_client():
+    """Lazy-init singleton Groq client."""
+    global _groq_client
+    if _groq_client is None:
+        _groq_client = Groq(api_key=GROQ_API_KEY)
+    return _groq_client
+
+def _get_openai_client():
+    """Lazy-init singleton OpenAI client for BLAIQ proxy."""
+    global _openai_client
+    if _openai_client is None:
+        _openai_client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_API_BASE_URL)
+    return _openai_client
+
+def _resolve_model_and_client(model: str):
+    """
+    Route to correct SDK client based on model prefix.
+    Returns (client, model_name_without_prefix).
+    """
+    if "/" not in model:
+        if model.startswith("llama-") or model.startswith("mixtral-") or model.startswith("gemma"):
+            return _get_groq_client(), model
+        else:
+            return _get_openai_client(), model
+
+    if model.startswith("groq/"):
+        return _get_groq_client(), model.replace("groq/", "", 1)
+    else:
+        # openai/ prefix or any other → BLAIQ proxy
+        return _get_openai_client(), model.replace("openai/", "", 1)
+
 def _invoke_llm(messages, model: str, **kwargs):
     """
-    Unified LiteLLM completion call with error handling and provider neutrality.
+    Unified completion call using Groq/OpenAI SDK directly.
     """
     call_id = str(uuid.uuid4())
     start = time.time()
-    
-    # Configure LiteLLM to drop unsupported params (like temperature for o1)
-    litellm.drop_params = True
-    
-    # Ensure custom models have a provider prefix for LiteLLM if missing
-    if "/" not in model:
-         # Treat gpt-oss as a custom OpenAI provider model
-         if not model.startswith("gpt-") or "gpt-oss" in model:
-            model = f"openai/{model}"
-    
+
+    client, model_name = _resolve_model_and_client(model)
+
+    # Remove any litellm-specific or irrelevant kwargs
+    kwargs.pop("api_base", None)
+    kwargs.pop("api_key", None)
+    kwargs.pop("stream_options", None)
+
     try:
         if os.getenv("DEBUG_LLM", "false").lower() == "true":
-            print(f"  [LLM {call_id}] Using api_base: {OPENAI_API_BASE_URL} | Model: {model}")
-        
-        # Determine parameters
+            provider = "Groq" if isinstance(client, Groq) else "OpenAI"
+            print(f"  [LLM {call_id}] Provider: {provider} | Model: {model_name}")
+
         params = {
-            "model": model,
+            "model": model_name,
             "messages": messages,
             "timeout": LLM_TIMEOUT_SECONDS,
-            "api_base": OPENAI_API_BASE_URL,
-            "api_key": OPENAI_API_KEY,
-            **kwargs
         }
-        
-        # Reasoning models (O1, QwQ, etc.) specific handling
-        is_reasoning = model.lower().startswith("o1") or "qwq" in model.lower()
-        
+
+        # Reasoning models (O1, QwQ, etc.)
+        is_reasoning = model_name.lower().startswith("o1") or "qwq" in model_name.lower()
+
         if is_reasoning:
-            # O1 specific: Remove temperature if set (OpenAI o1 only supports temp 1 or none)
-            if model.lower().startswith("o1"):
-                params.pop("temperature", None)
-            
-            # Switch max_tokens to max_completion_tokens if present for reasoning models
-            if "max_tokens" in params:
-                params["max_completion_tokens"] = params.pop("max_tokens")
-            
-            # Increase timeout significantly for reasoning models
-            params["timeout"] = 300  # 300 seconds (5 minutes) for CoT models
+            if model_name.lower().startswith("o1"):
+                kwargs.pop("temperature", None)
+            if "max_tokens" in kwargs:
+                params["max_completion_tokens"] = kwargs.pop("max_tokens")
+            params["timeout"] = 300
         else:
-            # Standard models
-            if "temperature" not in params:
+            if "temperature" not in kwargs:
                 params["temperature"] = 0.0
-            
-            if "max_tokens" not in params and LLM_MAX_OUTPUT_TOKENS:
+            if "max_tokens" not in kwargs and LLM_MAX_OUTPUT_TOKENS:
                 params["max_tokens"] = LLM_MAX_OUTPUT_TOKENS
 
-        # LiteLLM Unified Invocation
-        response = litellm.completion(**params)
-        
+        params.update(kwargs)
+
+        response = client.chat.completions.create(**params)
+
         duration_ms = int((time.time() - start) * 1000)
-        
+
         if os.getenv("DEBUG_LLM", "false").lower() == "true":
             usage = getattr(response, "usage", None)
             if usage:
                 t_in = getattr(usage, "prompt_tokens", 0)
                 t_out = getattr(usage, "completion_tokens", 0)
                 t_total = getattr(usage, "total_tokens", 0)
-                usage_str = f" | 📊 TOKENS: {t_total} [Input: {t_in}, Output: {t_out}]"
+                usage_str = f" | TOKENS: {t_total} [In: {t_in}, Out: {t_out}]"
             else:
-                usage_str = " | ⚠️ No token usage data returned by provider"
-            
-            print(f"  [LLM {call_id}] 🧠 Model: {model} | ⏱️ Duration: {duration_ms}ms{usage_str}")
-            
+                usage_str = ""
+            print(f"  [LLM {call_id}] Model: {model_name} | Duration: {duration_ms}ms{usage_str}")
+
         return response.choices[0].message.content, model
 
     except Exception as e:
         duration_ms = int((time.time() - start) * 1000)
-        print(f"  ❌ LiteLLM Error ({model}): {str(e)}")
+        print(f"  Error ({model_name}) after {duration_ms}ms: {str(e)}")
+
+        # Fallback mechanism
+        fallback = os.getenv("OPENAI_FALLBACK_MODEL")
+        if fallback and model != fallback and fallback != f"openai/{model}":
+            print(f"  Attempting fallback to {fallback}...")
+            return _invoke_llm(messages, model=fallback, **kwargs)
+
         raise
 
 def _invoke_llm_stream(messages, model: str, **kwargs):
     """
-    Streaming version of unified LLM call with metadata logging.
+    Streaming version using Groq/OpenAI SDK directly.
+    Returns an iterable stream with chunk.choices[0].delta.content.
     """
     call_id = str(uuid.uuid4())
     start = time.time()
-    
-    # Configure LiteLLM
-    litellm.drop_params = True
-    
-    if "/" not in model:
-         if not model.startswith("gpt-") or "gpt-oss" in model:
-            model = f"openai/{model}"
-    
-    # Log estimated prompt size
+
+    client, model_name = _resolve_model_and_client(model)
+
+    # Remove any litellm-specific kwargs
+    kwargs.pop("api_base", None)
+    kwargs.pop("api_key", None)
+    kwargs.pop("stream_options", None)
+
     prompt_chars = sum(len(m.get("content", "")) for m in messages)
-    
+
     if os.getenv("DEBUG_LLM", "false").lower() == "true":
-        print(f"  [STREAM {call_id}] 🧠 Starting {model} | Estimated Prompt: {prompt_chars} chars")
+        provider = "Groq" if isinstance(client, Groq) else "OpenAI"
+        print(f"  [STREAM {call_id}] Provider: {provider} | Model: {model_name} | Prompt: {prompt_chars} chars")
 
     try:
         params = {
-            "model": model,
+            "model": model_name,
             "messages": messages,
             "stream": True,
             "timeout": LLM_TIMEOUT_SECONDS,
-            "api_base": OPENAI_API_BASE_URL,
-            "api_key": OPENAI_API_KEY,
-            "stream_options": {"include_usage": True}, # Attempt to get usage in stream
-            **kwargs
         }
-        
+
         # Reasoning model handling
-        is_reasoning = model.lower().startswith("o1") or "qwq" in model.lower()
+        is_reasoning = model_name.lower().startswith("o1") or "qwq" in model_name.lower()
         if is_reasoning:
-            if model.lower().startswith("o1"):
-                params.pop("temperature", None) # O1 specific: Remove temperature if set
-            if "max_tokens" in params:
-                params["max_completion_tokens"] = params.pop("max_tokens")
+            if model_name.lower().startswith("o1"):
+                kwargs.pop("temperature", None)
+            if "max_tokens" in kwargs:
+                params["max_completion_tokens"] = kwargs.pop("max_tokens")
             params["timeout"] = 300
         else:
-            if "temperature" not in params:
+            if "temperature" not in kwargs:
                 params["temperature"] = 0.0
-            if "max_tokens" not in params and LLM_MAX_OUTPUT_TOKENS:
+            if "max_tokens" not in kwargs and LLM_MAX_OUTPUT_TOKENS:
                 params["max_tokens"] = LLM_MAX_OUTPUT_TOKENS
 
-        # LiteLLM Unified Invocation
-        return litellm.completion(**params)
+        params.update(kwargs)
+
+        return client.chat.completions.create(**params)
 
     except Exception as e:
         duration_ms = int((time.time() - start) * 1000)
-        print(f"  ❌ LiteLLM Stream Error ({model}): {str(e)}")
-        
+        print(f"  Stream Error ({model_name}) after {duration_ms}ms: {str(e)}")
+
+        # Fallback mechanism
+        fallback = os.getenv("OPENAI_FALLBACK_MODEL")
+        if fallback and model != fallback and fallback != f"openai/{model}":
+            print(f"  Attempting stream fallback to {fallback}...")
+            return _invoke_llm_stream(messages, model=fallback, **kwargs)
+
         log_llm_event("llm_error", {
             "call_id": call_id,
-            "model": model,
+            "model": model_name,
             "duration_ms": duration_ms,
             "error": str(e)
         })
@@ -629,13 +665,92 @@ class GraphRAGRetriever:
         print(f"✅ LLM Config: Planner={self.planner_model}, Pre={self.pre_model}, Post={self.post_model}")
         print("✅ GraphRAG Retriever initialized (Graph + Vector + Keyword)")
 
-    def get_embedding(self, text: str) -> List[float]:
-        """Get embedding using BGE-M3 Embeddings"""
+    def get_embedding(self, text: str) -> Optional[List[float]]:
+        """Get embedding using BGE-M3 Embeddings. Returns None on failure."""
         try:
-            return self.embeddings.embed_query(text)
+            embedding = self.embeddings.embed_query(text)
+            # Validate embedding
+            if not embedding or len(embedding) != self.embedding_dim:
+                print(f"  ⚠️ Embedding dimension mismatch: got {len(embedding) if embedding else 0}, expected {self.embedding_dim}")
+                return None
+            # Check for zero vector (embedding service failure)
+            non_zero = sum(1 for v in embedding if abs(v) > 1e-10)
+            if non_zero < 10:
+                print(f"  ⚠️ Embedding is near-zero ({non_zero} non-zero values). Embedding service may have failed.")
+                return None
+            return embedding
         except Exception as e:
             print(f"  ⚠️ Error getting embedding: {e}")
-            return [0.0] * self.embedding_dim
+            return None
+
+    def reformat_answer(self, base_answer: str, content_mode: str, model: Optional[str] = None) -> str:
+        """
+        Takes a strategic base answer and reformats it using a specialized XML template.
+        Supports: EMAIL, TABLE, INVOICE.
+        """
+        if not content_mode or content_mode.upper() == "DEFAULT":
+            return base_answer
+            
+        template_xml = self.loader.load_template(content_mode)
+        if not template_xml:
+            print(f"  ⚠️ Template for mode '{content_mode}' not found. Returning original answer.")
+            return base_answer
+
+        actual_model = model or self.post_model
+        print(f"  ✨ Reformatting answer into '{content_mode.upper()}' mode using {actual_model}...")
+
+        messages = [
+            {"role": "system", "content": template_xml},
+            {"role": "user", "content": f"Please reformat this analysis into the target structure:\n\n{base_answer}"},
+        ]
+
+        try:
+            content, _ = _invoke_llm(
+                messages,
+                model=actual_model,
+                max_tokens=2000 # Formatted outputs usually don't need 4k
+            )
+            return content
+        except Exception as e:
+            print(f"  ❌ Reformatting failed: {e}")
+            return base_answer
+
+    def reformat_answer_stream(self, base_answer: str, content_mode: str, model: Optional[str] = None):
+        """
+        Streams a reformatted base answer using specialized XML templates.
+        """
+        if not content_mode or content_mode.upper() == "DEFAULT":
+            # Just yield the base answer if no mode
+            yield base_answer
+            return
+            
+        template_xml = self.loader.load_template(content_mode)
+        if not template_xml:
+            print(f"  ⚠️ Template for mode '{content_mode}' not found.")
+            yield base_answer
+            return
+
+        actual_model = model or self.post_model
+        messages = [
+            {"role": "system", "content": template_xml},
+            {"role": "user", "content": f"Please reformat this analysis into the target structure:\n\n{base_answer}"},
+        ]
+
+        try:
+            return _invoke_llm_stream(
+                messages,
+                model=actual_model,
+                max_tokens=4000,
+                timeout=120,
+                stream_options={"include_usage": True}
+            )
+        except Exception as e:
+            print(f"  ❌ Streaming Reformatting failed: {e}")
+            # Yield a mock LiteLLM chunk for robustness
+            class MockChunk:
+                def __init__(self, c):
+                    self.choices = [type('obj', (object,), {'delta': type('obj', (object,), {'content': c})()})()]
+            yield MockChunk(base_answer)
 
     def rewrite_query(self, query: str, history: str) -> str:
         """Rewrite context-dependent queries using conversation history."""
@@ -691,14 +806,15 @@ class GraphRAGRetriever:
 
     def plan_retrieval(self, query: str) -> Dict:
         """
-        Think strategically and plan the retrieval steps.
+        Unified strategic planning: intent + entities + keywords in one LLM call.
+        Returns plan with search_plan, entities, and keywords.
         """
         try:
             messages = [
                 {"role": "system", "content": self.planner_prompt},
                 {"role": "user", "content": f"User Query: {query}"}
             ]
-            
+
             raw_response, used_model = _invoke_llm(
                 messages,
                 model=self.planner_model,
@@ -707,54 +823,109 @@ class GraphRAGRetriever:
                 response_format={"type": "json_object"}
             )
 
-            # 2. Parse JSON
             plan = json.loads(raw_response)
-            
-            # 3. Map new XML schema ("routes") to internal keys
-            routes = plan.get("routes", {})
-            search_plan = {
-                "use_vector": routes.get("use_vector", True),
-                "use_graph": routes.get("use_graph", False),
-                "use_keyword": routes.get("use_vector", True), # Fallback to vector logic for keyword
-                "use_hive_mind": routes.get("use_hive_mind", False)
-            }
-            
-            # Backwards compatibility for the rest of the code
+
+            # Normalize search_plan from unified output
+            search_plan = plan.get("search_plan", {})
+            if not search_plan:
+                # Fallback: try "routes" key from old format
+                routes = plan.get("routes", {})
+                search_plan = {
+                    "use_vector": routes.get("use_vector", True),
+                    "use_graph": routes.get("use_graph", False),
+                    "use_keyword": routes.get("use_keyword", True),
+                    "use_hive_mind": routes.get("use_hive_mind", False)
+                }
             plan["search_plan"] = search_plan
-            
-            # MANDATORY GRAPH SEARCH: Always enable for DOCUMENT_SEARCH and ANALYTICAL_SEARCH
+
+            # Ensure entities and keywords are lists
+            if not isinstance(plan.get("entities"), list):
+                plan["entities"] = []
+            if not isinstance(plan.get("keywords"), list):
+                plan["keywords"] = []
+
+            # POLICY: Always enable graph for DOCUMENT_SEARCH and ANALYTICAL_SEARCH
             mode = plan.get("mode", "DOCUMENT_SEARCH")
             if mode in ["DOCUMENT_SEARCH", "ANALYTICAL_SEARCH"]:
-                if not search_plan["use_graph"]:
-                    if self.debug:
-                        print(f"🔧 POLICY: Enabling Graph search for {mode} mode")
-                    search_plan["use_graph"] = True
-                    plan["search_plan"]["use_graph"] = True
-            
-            # SAFETY OVERRIDE: If query contains capitalized names but Graph is disabled, force it
-            # This ensures we never miss entity-based queries
-            if not search_plan["use_graph"]:
-                # Check for proper names or IDs in the query
+                search_plan["use_graph"] = True
+
+            # SAFETY: Force graph if query has proper names or IDs
+            if not search_plan.get("use_graph"):
                 has_entities = bool(re.findall(r'\b[A-Z][a-z]{3,12}\b', query))
                 has_ids = bool(re.findall(r'\b[A-Z]{2,5}-\d{2,8}\b', query))
-                
                 if has_entities or has_ids:
-                    if self.debug:
-                        print(f"⚠️ OVERRIDE: Detected entities/IDs - forcing Graph search ON")
                     search_plan["use_graph"] = True
-                    plan["search_plan"]["use_graph"] = True
-            
+
+            # FALLBACK: If planner returned no entities, do fast rule-based extraction
+            if not plan["entities"]:
+                plan["entities"] = self._extract_entities_fast(query)
+
+            # FALLBACK: If planner returned no keywords, do fast rule-based extraction
+            if not plan["keywords"]:
+                plan["keywords"] = self._extract_keywords_fast(query)
+
             if self.debug:
-                print(f"🧠 Strategy: {plan.get('mode')} | Routes: {routes}")
+                print(f"🧠 Unified Plan: mode={mode} | entities={plan['entities']} | keywords={plan['keywords'][:5]}")
 
             return plan
 
         except Exception as e:
-            print(f"⚠️ Planner failed, defaulting to FULL SEARCH. Error: {e}")
+            print(f"⚠️ Planner failed, defaulting to FULL SEARCH with rule-based extraction. Error: {e}")
             return {
                 "mode": "FALLBACK",
-                "search_plan": {"use_vector": True, "use_graph": True, "use_keyword": True, "use_hive_mind": False}
+                "search_plan": {"use_vector": True, "use_graph": True, "use_keyword": True, "use_hive_mind": False},
+                "entities": self._extract_entities_fast(query),
+                "keywords": self._extract_keywords_fast(query),
             }
+
+    def _extract_entities_fast(self, query: str) -> List[str]:
+        """Fast rule-based entity extraction (< 10ms, no LLM call)."""
+        entities = []
+
+        # Currency amounts
+        entities.extend(re.findall(r'€\s*\d{1,3}(?:\.\d{3})*(?:,\d{2})?', query))
+        # Percentages
+        entities.extend(re.findall(r'\d+(?:,\d+)?\s*%', query))
+        # Years
+        entities.extend(re.findall(r'\b(19\d{2}|20\d{2})\b', query))
+        # IDs (WFT-25022 pattern)
+        entities.extend(re.findall(r'\b[A-Za-z]{2,5}-\d{2,8}\b', query))
+        # Proper nouns (capitalized words, skip common articles)
+        skip = {'Der', 'Die', 'Das', 'Was', 'Wie', 'Wer', 'Wo', 'Warum', 'Erstelle',
+                'The', 'What', 'Who', 'Where', 'When', 'Why', 'How', 'Create', 'Show',
+                'Can', 'Could', 'Would', 'Should', 'Is', 'Are', 'Find', 'Eine', 'Einen'}
+        for word in query.split():
+            if word and word[0].isupper() and word not in skip:
+                clean = re.sub(r'[^\w\-]', '', word)
+                if len(clean) >= 3:
+                    entities.append(clean)
+        # German compound nouns (8+ chars, capitalized)
+        entities.extend(re.findall(r'\b[A-ZÄÖÜ][a-zäöüß]{7,}\b', query))
+        # Organization patterns
+        entities.extend(re.findall(r'\b[\w\s]+(?:GmbH|AG|e\.V\.|Ltd|Inc|Corp)\b', query, re.IGNORECASE))
+
+        return list(set(entities))
+
+    def _extract_keywords_fast(self, query: str) -> List[str]:
+        """Fast rule-based keyword extraction (< 10ms, no LLM call)."""
+        stop_words = {
+            "der", "die", "das", "und", "oder", "ist", "sind", "war", "ein", "eine",
+            "für", "auf", "mit", "von", "zu", "bei", "nach", "über", "unter", "vor",
+            "welche", "welcher", "wie", "was", "wann", "wo", "warum", "wer",
+            "the", "a", "an", "and", "or", "but", "if", "for", "with", "about",
+            "from", "what", "which", "who", "how", "this", "that", "these", "those",
+            "erstelle", "basierend", "folgende", "strukturierte", "soll", "tabelle",
+            "create", "based", "following", "structured", "should", "table",
+        }
+
+        words = re.findall(r"\b[A-Za-zÄÖÜäöüß]+\b", query)
+        keywords = [w for w in words if w.lower() not in stop_words and len(w) > 3]
+
+        # Also include numbers and number patterns
+        keywords.extend(re.findall(r'\d{1,3}(?:\.\d{3})*(?:,\d{2})?', query))
+        keywords.extend(re.findall(r'\b\d+\b', query))
+
+        return list(set(keywords))
     def extract_entities_with_llm(self, query: str) -> List[str]:
         """
         Extract entities from query using a hybrid approach:
@@ -1248,56 +1419,61 @@ Output ONLY a JSON object with this structure:
         """Vector search using embeddings (Qdrant collection = tenant isolation)"""
         query_embedding = self.get_embedding(query)
 
-        # Fallback logic for Qdrant client methods (search vs query)
+        if query_embedding is None:
+            print(f"  ⚠️ Vector search skipped: embedding failed for query '{query[:50]}...'")
+            return {}
+
+        import requests as req_lib
+
+        q_url = os.getenv("QDRANT_URL", "https://qdrant.api.blaiq.ai").rstrip("/")
+        api_key = os.getenv("QDRANT_API_KEY")
+        headers = {"api-key": api_key} if api_key else {}
+
+        # Strategy 1: REST API direct call
         try:
-            # Manual REST call to bypass QdrantClient connection issues
-            import requests
-            import json
-            
-            # Robust connection details
-            q_url = os.getenv("QDRANT_URL", "https://qdrant.api.blaiq.ai").rstrip("/")
             search_url = f"{q_url}/collections/{self.collection_name}/points/search"
-            
-            # Extract API key if set based on client headers
-            headers = {}
-            api_key = os.getenv("QDRANT_API_KEY") or (self.qdrant_client._api_key if hasattr(self.qdrant_client, "_api_key") else None)
-            
-            if api_key:
-                headers["api-key"] = api_key
-            
             payload = {
                 "vector": query_embedding,
                 "limit": k,
-                "with_payload": True,
-                "score_threshold": 0.0 # Return all
+                "with_payload": False,
+                "score_threshold": 0.1
             }
-            
-            if self.debug:
-                 print(f"DEBUG: Manual Qdrant Search (requests) to {search_url}")
 
-            # Use requests with verify=False
-            try:
-                resp = requests.post(search_url, json=payload, headers=headers, verify=False, timeout=10.0)
-                if self.debug: print(f"DEBUG: Qdrant response status: {resp.status_code}")
-            except Exception as req_err:
-                print(f"  ❌ requests.post failed: {req_err}")
-                raise req_err
-            
+            if self.debug:
+                print(f"DEBUG: Vector search to {search_url} (k={k})")
+
+            resp = req_lib.post(search_url, json=payload, headers=headers, verify=False, timeout=15.0)
+
             if resp.status_code == 200:
                 results = resp.json().get("result", [])
-                if self.debug: print(f"DEBUG: Qdrant returned {len(results)} results")
-                # Do not cast to int, Qdrant IDs can be UUIDs. Ensure score is float.
+                if self.debug:
+                    print(f"DEBUG: Vector returned {len(results)} results")
                 return {
-                    point.get("id"): float(point.get("score") or 0.0) 
-                    for point in results 
+                    point.get("id"): float(point.get("score") or 0.0)
+                    for point in results
                     if point.get("id") is not None
                 }
             else:
-                print(f"  ⚠️ Manual Qdrant search failed: {resp.status_code} - {resp.text}")
-                return {}
+                print(f"  ⚠️ Vector REST failed ({resp.status_code}): {resp.text[:200]}")
 
         except Exception as e:
-            print(f"  ⚠️ Vector search failed (requests): {e}")
+            print(f"  ⚠️ Vector REST call failed: {e}")
+
+        # Strategy 2: QdrantClient fallback
+        try:
+            print(f"  🔄 Falling back to QdrantClient for vector search...")
+            results = self.qdrant_client.search(
+                collection_name=self.collection_name,
+                query_vector=query_embedding,
+                limit=k,
+                score_threshold=0.1,
+            )
+            return {
+                point.id: point.score
+                for point in results
+            }
+        except Exception as e:
+            print(f"  ⚠️ QdrantClient fallback also failed: {e}")
             return {}
 
     def keyword_search(self, query: str, expanded_query: Dict, k: int) -> Dict[int, float]:
@@ -1630,36 +1806,42 @@ Output ONLY a JSON object with this structure:
 
         # --- RESPONSE BRANCH C: LOCAL SEARCH (EVENT DRIVEN) ---
         print(f"🔍 Executing Local Search (tenant: {self.filter_label})...")
-        
-        # Use planner's already extracted entities
-        entities = plan.get("entities_german", [])
-        if not entities:
-            # Fallback to secondary extraction if planner missed them
-            entities = self.extract_entities_with_llm(query)
-            
+
+        # Use unified planner's entities and keywords (no separate LLM calls)
+        entities = plan.get("entities", [])
+        keywords = plan.get("keywords", [])
         search_plan = plan.get("search_plan", {"use_vector": True, "use_graph": True, "use_keyword": True})
-        
+
+        # Build expanded_query from planner keywords
+        expanded_query = {
+            "original": query,
+            "keywords": keywords,
+            "numbers": [k for k in keywords if any(c.isdigit() for c in k)],
+            "years": [], "percentages": [], "expected_patterns": [],
+        }
+
         broad_k = k * 10
         rankings = {}
-        
+
         # 1. GRAPH (Conditional)
         if search_plan.get("use_graph") and self.neo4j_driver and entities and self.filter_label:
             graph_results = self.entity_based_retrieval(entities, k=broad_k)
             if graph_results:
                 rankings["graph"] = graph_results
                 print(f"  🔗 Graph used: {len(graph_results)} entity-linked chunks")
-        
+
         # 2. VECTOR (Conditional)
         if search_plan.get("use_vector"):
             vector_results = self.vector_search(query, k=broad_k)
-            rankings["vector"] = vector_results
+            if vector_results:
+                rankings["vector"] = vector_results
             print(f"  📊 Vector used: {len(vector_results)} results")
-            
+
         # 3. KEYWORD (Conditional)
         if search_plan.get("use_keyword"):
-            expanded_query = self.expand_query_with_cot(query)
             keyword_results = self.keyword_search(query, expanded_query, k=broad_k)
-            rankings["keyword"] = keyword_results
+            if keyword_results:
+                rankings["keyword"] = keyword_results
             print(f"  🔑 Keyword used: {len(keyword_results)} results")
 
         # 4. ADJACENT CHUNKS (Context preservation)
@@ -1683,8 +1865,10 @@ Output ONLY a JSON object with this structure:
         else:
             weights = {"vector": 0.70, "keyword": 0.25, "adjacent": 0.05}
 
-        fused_results = self.weighted_rrf_fusion(rankings, weights=weights, k=60)
-        chunks = self._retrieve_chunks(fused_results[:k])
+        fused_results = self.weighted_rrf_fusion(rankings, weights=weights, k=25)
+        # Ensure we respect the user's requested k, but cap it at the fused limit
+        final_k = min(k, 25)
+        chunks = self._retrieve_chunks(fused_results[:final_k])
 
         stats = {
             "mode": "local_search",
@@ -2142,23 +2326,47 @@ def generate_answer_stream(
     system_prompt: Optional[str] = None,
     user_prompt: Optional[str] = None,
     model: Optional[str] = None,
+    content_mode: Optional[str] = None,
+    format_template: Optional[str] = None,
 ):
     """
-    Generate answer stream using LLM with conversation history.
+    Generate answer stream using LLM with conversation history and integrated formatting.
+
+    When content_mode is TABLE/EMAIL/INVOICE, the formatting template is injected directly
+    into the system prompt so the LLM generates the answer in the correct format in ONE shot.
     """
     final_system_prompt = system_prompt or POST_RETRIEVAL_SYSTEM_PROMPT
     final_user_prompt = user_prompt or DEFAULT_USER_PROMPT
     actual_model = model or LITELLM_POST_MODEL
 
+    # Inject formatting template if content_mode is specified
+    if content_mode and content_mode.upper() != "DEFAULT" and format_template:
+        mode_upper = content_mode.upper()
+        final_system_prompt += f"""
+
+=== MANDATORY OUTPUT FORMAT: {mode_upper} ===
+The user has requested their answer in {mode_upper} format. You MUST format your ENTIRE response according to these formatting rules:
+
+{format_template}
+
+IMPORTANT RULES FOR {mode_upper} FORMAT:
+1. Your response MUST be in {mode_upper} format from the very first line. Do NOT write a regular answer first.
+2. If the retrieved data does NOT contain enough information to create a complete {mode_upper}, respond with:
+   - A brief explanation of what data IS available
+   - A clear list of what ADDITIONAL information you need from the user to complete the {mode_upper}
+   - Format this as a friendly request, e.g. "Um eine vollständige {mode_upper} zu erstellen, benötige ich noch folgende Informationen: ..."
+3. Use the SAME LANGUAGE as the user's query for the formatted output.
+4. Include source citations within the formatted output where applicable.
+"""
+
     try:
-        from retriever.graphrag_retriever import format_chunks_for_context
         context = format_chunks_for_context(chunks)
         formatted_user_prompt = final_user_prompt.format(context=context, query=query)
 
         messages = [
             {"role": "system", "content": final_system_prompt},
         ]
-        
+
         # Inject conversation history turns
         if history:
             for msg in history:
@@ -2179,3 +2387,130 @@ def generate_answer_stream(
     except Exception as e:
         print(f"Streaming Error: {e}")
         raise
+
+    async def graphrag_retrieval_async(
+        self, query: str, k: int = 20, debug: bool = None, status_callback=None
+    ) -> Tuple[List[Document], Dict]:
+        """
+        Async version: Strategic Context-Driven Retrieval via asyncio.
+        status_callback: Async function to receive progress updates {"step": str, "details": str}
+        """
+        if debug is None:
+            debug = self.debug
+
+        # --- STEP 1: STRATEGIC PLANNING (Async) ---
+        print(f"🎯 Planning retrieval strategy (Async) for: '{query[:50]}...'")
+        
+        if status_callback: await status_callback({"step": "planning", "details": "Analyzing query intent..."})
+        loop = asyncio.get_running_loop()
+        plan = await loop.run_in_executor(None, self.plan_retrieval, query)
+        if status_callback: await status_callback({"step": "planning_done", "details": f"Mode: {plan.get('mode')}"})
+        
+        search_mode = plan.get("mode", "LOCAL_SEARCH")
+
+        # --- RESPONSE BRANCH A: SMALL TALK ---
+        if search_mode == "SMALL_TALK":
+            print("  ☕ Direct conversational reply (No DB search needed)")
+            system_doc = Document(
+                page_content=plan.get("direct_reply") or "Hallo! Wie kann ich Ihnen bei Ihren Dokumenten helfen?",
+                metadata={"mode": "small_talk", "is_direct": True}
+            )
+            return [system_doc], {"mode": "small_talk", "plan": plan}
+
+        # --- RESPONSE BRANCH B: GLOBAL HIVE ---
+        if search_mode == "GLOBAL_SEARCH":
+            print("  🕸️ Global Hive Mode: Strategic summary across corpus")
+            summary = await loop.run_in_executor(None, self.generate_global_hive_summary, query)
+            if summary:
+                global_doc = Document(
+                    page_content=summary,
+                    metadata={"mode": "global_hive", "is_direct": True}
+                )
+                return [global_doc], {"mode": "global_hive", "plan": plan}
+            print("  ⚠️ Global summary failed, falling back to local search")
+
+        # --- RESPONSE BRANCH C: LOCAL SEARCH (Async Parallel) ---
+        print(f"🔍 Executing Local Search (tenant: {self.filter_label})...")
+
+        # Use unified planner's entities and keywords (no separate LLM calls)
+        entities = plan.get("entities", [])
+        keywords = plan.get("keywords", [])
+        if status_callback: await status_callback({"step": "extraction_done", "details": f"Found {len(entities)} entities, {len(keywords)} keywords"})
+
+        search_plan = plan.get("search_plan", {"use_vector": True, "use_graph": True, "use_keyword": True})
+        broad_k = k * 10
+
+        # Build expanded_query from planner keywords
+        expanded_query = {
+            "original": query,
+            "keywords": keywords,
+            "numbers": [k for k in keywords if any(c.isdigit() for c in str(k))],
+            "years": [], "percentages": [], "expected_patterns": [],
+        }
+
+        # Launch tasks concurrently
+        tasks = []
+        task_types = []
+
+        # 1. GRAPH
+        if search_plan.get("use_graph") and self.neo4j_driver and entities and self.filter_label:
+             tasks.append(loop.run_in_executor(None, self.entity_based_retrieval, entities, broad_k))
+             task_types.append("graph")
+
+        # 2. VECTOR
+        if search_plan.get("use_vector"):
+             tasks.append(loop.run_in_executor(None, self.vector_search, query, broad_k))
+             task_types.append("vector")
+
+        # 3. KEYWORD
+        if search_plan.get("use_keyword"):
+             tasks.append(loop.run_in_executor(None, self.keyword_search, query, expanded_query, broad_k))
+             task_types.append("keyword")
+
+        # Wait for all
+        if status_callback: await status_callback({"step": "search_start", "details": f"Launching {len(tasks)} parallel searches..."})
+        results = await asyncio.gather(*tasks) if tasks else []
+        
+        rankings = {}
+        for type_name, res in zip(task_types, results):
+            if res:
+                rankings[type_name] = res
+                print(f"  ✅ {type_name.capitalize()} search done: {len(res)} results")
+                if status_callback: await status_callback({"step": "search_done", "details": f"{type_name.capitalize()} search found {len(res)} results"})
+
+        # 4. ADJACENT CHUNKS (Requires I/O too)
+        all_top = []
+        for r_dict in rankings.values():
+            all_top.extend(list(r_dict.keys())[:10])
+        all_top = list(set(all_top[:30]))
+
+        if all_top:
+            adjacent_results = await loop.run_in_executor(None, self.get_adjacent_chunks, all_top[:20], 1)
+            if adjacent_results:
+                rankings["adjacent"] = adjacent_results
+
+        # Stage 4: Fusion
+        if not rankings:
+             return [], {"mode": "error", "error": "No relevant data found"}
+
+        if "graph" in rankings:
+            weights = {"graph": 0.40, "vector": 0.45, "keyword": 0.10, "adjacent": 0.05}
+        else:
+            weights = {"vector": 0.70, "keyword": 0.25, "adjacent": 0.05}
+
+        fused_results = self.weighted_rrf_fusion(rankings, weights=weights, k=60)
+        
+        # Retrieve final chunks (I/O bound)
+        chunks = await loop.run_in_executor(None, self._retrieve_chunks, fused_results[:k])
+
+        stats = {
+            "mode": "local_search_async",
+            "planning": plan,
+            "graph_used": "graph" in rankings,
+            "vector_used": "vector" in rankings,
+            "keyword_used": "keyword" in rankings,
+            "chunks_retrieved": len(chunks),
+            "filter_label": self.filter_label
+        }
+
+        return chunks, stats

@@ -156,21 +156,31 @@ class AsyncRetriever:
             task_map[idx] = "hive_mind"
             idx += 1
         
-        # Wait for all to complete
+        # Wait for all to complete with robustness
         if not tasks:
             return {}, {}, {}
             
-        results = await asyncio.gather(*tasks)
+        # Use return_exceptions=True to ensure one failure doesn't crash the whole pipeline
+        results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # Unpack results dynamicall
+        # Unpack results dynamically
         rankings = {}
         timings = {}
         special_results = {}
         
         max_time = 0.0
         
-        for i, (res, elapsed) in enumerate(results):
+        for i, task_result in enumerate(results):
             type_key = task_map.get(i, "unknown")
+            
+            # Check if task raised an exception
+            if isinstance(task_result, Exception):
+                print(f"  ❌ Parallel task '{type_key}' failed: {task_result}")
+                timings[f"{type_key}_search"] = 0.0
+                continue
+                
+            # Otherwise unpack the normal (res, elapsed) tuple
+            res, elapsed = task_result
             
             if type_key == "hive_mind":
                 if res:

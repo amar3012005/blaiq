@@ -15,7 +15,8 @@
 
         :root {
             --primary: #F25623;
-            --primary-light: #ff7a4d;
+            --primary-light: #FF7A4D;
+            --primary-gradient: linear-gradient(135deg, #F25623 0%, #FF7A4D 100%);
             --bg-main: #ffffff;
             --bg-secondary: #f7f7f8;
             --bg-chat: #ffffff;
@@ -24,9 +25,10 @@
             --text-muted: #999999;
             --border: #e5e5e5;
             --border-light: #f0f0f0;
-            --user-bg: #F25623;
-            --assistant-bg: #f7f7f8;
-            --shadow: rgba(0, 0, 0, 0.05);
+            --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+            --glass-bg: rgba(255, 255, 255, 0.8);
+            --glass-border: rgba(255, 255, 255, 0.5);
         }
 
         body {
@@ -202,6 +204,24 @@
             color: var(--primary);
         }
 
+        /* Content Mode Selector */
+        .mode-selector {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            font-size: 0.75rem;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-weight: 600;
+            outline: none;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+
+        .mode-selector:hover {
+            border-color: var(--primary);
+        }
+
         @keyframes pulse {
             0% {
                 opacity: 1;
@@ -246,11 +266,15 @@
             justify-content: center;
             font-size: 0.9rem;
             flex-shrink: 0;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
         }
 
         .message.user .message-avatar {
             background: var(--primary);
             color: white;
+            border: none;
         }
 
         .message.assistant .message-avatar {
@@ -275,7 +299,8 @@
             font-size: 0.95rem;
             line-height: 1.7;
             color: var(--text-primary);
-            white-space: pre-wrap;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
         }
 
         .message-text strong {
@@ -447,29 +472,32 @@
             max-width: 400px;
         }
 
-        /* Input Area */
+        /* Input Container Enhancements */
         .input-container {
-            padding: 16px 24px 24px;
+            padding: 20px 32px 32px;
             background: var(--bg-main);
             border-top: 1px solid var(--border-light);
+            backdrop-filter: blur(10px);
         }
 
         .input-wrapper {
-            display: flex;
-            align-items: flex-end;
-            gap: 12px;
-            max-width: 900px;
+            max-width: 1000px;
             margin: 0 auto;
             background: var(--bg-secondary);
             border: 1px solid var(--border);
-            border-radius: 16px;
-            padding: 12px 16px;
-            transition: border-color 0.2s, box-shadow 0.2s;
+            border-radius: 20px;
+            padding: 8px 16px;
+            display: flex;
+            align-items: flex-end;
+            gap: 12px;
+            box-shadow: var(--shadow-sm);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         .input-wrapper:focus-within {
             border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(242, 86, 35, 0.1);
+            box-shadow: var(--shadow-md), 0 0 0 3px rgba(242, 86, 35, 0.1);
+            background: white;
         }
 
         .input-wrapper textarea {
@@ -480,13 +508,10 @@
             color: var(--text-primary);
             resize: none;
             outline: none;
+            padding: 12px 0;
             max-height: 200px;
-            line-height: 1.5;
+            line-height: 1.6;
             font-family: inherit;
-        }
-
-        .input-wrapper textarea::placeholder {
-            color: var(--text-muted);
         }
 
         .send-btn {
@@ -502,6 +527,7 @@
             justify-content: center;
             transition: background 0.2s, transform 0.1s;
             flex-shrink: 0;
+            margin-bottom: 4px;
         }
 
         .send-btn:hover {
@@ -522,14 +548,35 @@
             height: 20px;
         }
 
-        /* Footer hints */
         .input-hints {
+            max-width: 1000px;
+            margin: 12px auto 0;
             display: flex;
-            justify-content: center;
-            gap: 24px;
-            margin-top: 12px;
-            font-size: 0.75rem;
+            align-items: center;
+            justify-content: space-between;
             color: var(--text-muted);
+            font-size: 0.75rem;
+            padding: 0 4px;
+        }
+
+        .mode-selector {
+            background: white;
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            font-size: 0.7rem;
+            padding: 4px 10px;
+            border-radius: 8px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .mode-selector:hover {
+            border-color: var(--primary);
+            color: var(--primary);
         }
 
         .hint-item {
@@ -574,10 +621,392 @@
                 grid-template-columns: repeat(2, 1fr);
             }
         }
+
+        /* Auth Modal Refinement */
+        #authModal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #ffffff;
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .auth-box {
+            width: 380px;
+            padding: 48px;
+            border-radius: 24px;
+            background: white;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            border: 1px solid var(--border-light);
+        }
+
+        .auth-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 24px;
+            color: var(--text-primary);
+        }
+
+        .auth-input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 1rem;
+            margin-bottom: 16px;
+            outline: none;
+            text-align: center;
+            letter-spacing: 2px;
+        }
+
+        .auth-input:focus {
+            border-color: var(--primary);
+        }
+
+        .auth-btn {
+            width: 100%;
+            padding: 12px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .auth-btn:hover {
+            background: var(--primary-light);
+        }
+
+        /* Reasoning Block Styling */
+        .reasoning-block {
+            background: linear-gradient(135deg, #fef7f4 0%, #fdf2ec 100%);
+            border: 1px solid rgba(242, 86, 35, 0.15);
+            border-left: 3px solid var(--primary);
+            border-radius: 0 10px 10px 0;
+            padding: 16px 20px;
+            margin-bottom: 20px;
+            font-size: 0.88rem;
+            color: var(--text-secondary);
+            line-height: 1.7;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .reasoning-block.collapsed .reasoning-body {
+            max-height: 60px;
+            overflow: hidden;
+            mask-image: linear-gradient(to bottom, black 40%, transparent 100%);
+            -webkit-mask-image: linear-gradient(to bottom, black 40%, transparent 100%);
+        }
+
+        .reasoning-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.72rem;
+            color: var(--primary);
+            cursor: pointer;
+            font-weight: 600;
+            margin-top: 6px;
+            padding: 2px 0;
+            border: none;
+            background: none;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .reasoning-toggle:hover { opacity: 0.7; }
+
+        .reasoning-title {
+            font-weight: 700;
+            color: var(--primary);
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .reasoning-body strong {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        /* Thinking Animation */
+        .thinking-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 20px;
+            background: linear-gradient(135deg, #fef7f4 0%, #fdf2ec 100%);
+            border-left: 3px solid var(--primary);
+            border-radius: 0 10px 10px 0;
+            margin-bottom: 16px;
+            font-size: 0.85rem;
+            color: var(--primary);
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .thinking-dots {
+            display: flex;
+            gap: 4px;
+        }
+
+        .thinking-dots span {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--primary);
+            animation: thinkBounce 1.4s ease-in-out infinite;
+        }
+
+        .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes thinkBounce {
+            0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+            40% { transform: scale(1); opacity: 1; }
+        }
+
+        /* Section Headers */
+        .response-section {
+            margin: 20px 0 12px 0;
+            padding-bottom: 6px;
+            border-bottom: 2px solid var(--border-light);
+        }
+
+        .response-section h2 {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 0;
+        }
+
+        .response-section h3 {
+            font-size: 0.92rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin: 0;
+        }
+
+        /* Markdown Tables */
+        .md-table-wrapper {
+            overflow-x: auto;
+            margin: 16px 0;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+        }
+
+        .md-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+            white-space: nowrap;
+        }
+
+        .md-table thead th {
+            background: linear-gradient(135deg, #F25623 0%, #FF7A4D 100%);
+            color: white;
+            font-weight: 600;
+            padding: 10px 16px;
+            text-align: left;
+            font-size: 0.8rem;
+            letter-spacing: 0.3px;
+            text-transform: none;
+            border: none;
+        }
+
+        .md-table thead th:first-child {
+            border-radius: 9px 0 0 0;
+        }
+
+        .md-table thead th:last-child {
+            border-radius: 0 9px 0 0;
+        }
+
+        .md-table tbody td {
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border-light);
+            color: var(--text-primary);
+        }
+
+        .md-table tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .md-table tbody tr:nth-child(even) {
+            background: var(--bg-secondary);
+        }
+
+        .md-table tbody tr:hover {
+            background: rgba(242, 86, 35, 0.04);
+        }
+
+        /* Lists */
+        .md-list {
+            margin: 8px 0;
+            padding-left: 24px;
+        }
+
+        .md-list li {
+            margin: 4px 0;
+            line-height: 1.6;
+        }
+
+        .md-list li::marker {
+            color: var(--primary);
+        }
+
+        /* Inline Source Citations */
+        .source-citation {
+            display: inline;
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: var(--primary);
+            background: rgba(242, 86, 35, 0.08);
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+
+        /* Confidence Meter */
+        .confidence-block {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin: 16px 0 8px 0;
+            padding: 12px 16px;
+            background: var(--bg-secondary);
+            border-radius: 10px;
+            border: 1px solid var(--border-light);
+        }
+
+        .confidence-label {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        .confidence-bar {
+            flex: 1;
+            height: 8px;
+            background: var(--border-light);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .confidence-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.6s ease;
+        }
+
+        .confidence-fill.high { background: linear-gradient(90deg, #22c55e, #16a34a); }
+        .confidence-fill.medium { background: linear-gradient(90deg, #f59e0b, #d97706); }
+        .confidence-fill.low { background: linear-gradient(90deg, #ef4444, #dc2626); }
+
+        .confidence-value {
+            font-size: 0.85rem;
+            font-weight: 700;
+            min-width: 40px;
+            text-align: right;
+        }
+
+        .confidence-value.high { color: #16a34a; }
+        .confidence-value.medium { color: #d97706; }
+        .confidence-value.low { color: #dc2626; }
+
+        /* Mode Badge */
+        .mode-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+        }
+
+        .mode-badge.table { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+        .mode-badge.email { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+        .mode-badge.invoice { background: #fefce8; color: #a16207; border: 1px solid #fde68a; }
+
+        /* Stage Divider */
+        .stage-divider {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 24px 0;
+            position: relative;
+        }
+
+        .stage-divider::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: var(--border);
+            z-index: 0;
+        }
+
+        .divider-text {
+            background: var(--bg-main);
+            padding: 4px 12px;
+            color: var(--primary);
+            font-size: 0.75rem;
+            font-weight: 700;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            z-index: 1;
+            text-transform: uppercase;
+        }
+
+        /* Code inline */
+        .md-code {
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-light);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            color: #c7254e;
+        }
     </style>
 </head>
 
 <body>
+    <!-- Auth Modal -->
+    <div id="authModal">
+        <div class="auth-box">
+            <h2 class="auth-title">Access Protected</h2>
+            <input type="password" id="authInput" class="auth-input" placeholder="Passcode" maxlength="6">
+            <button id="authBtn" class="auth-btn">Unlock</button>
+            <p id="authError" style="color: red; margin-top: 12px; font-size: 0.8rem; display: none;">Invalid Passcode
+            </p>
+        </div>
+    </div>
+
     <!-- Header -->
     <header class="header">
         <div class="logo">
@@ -618,14 +1047,54 @@
                 </button>
             </div>
             <div class="input-hints">
-                <span class="hint-item">Press Enter to send</span>
-                <span class="hint-item">•</span>
-                <span class="hint-item">Shift+Enter for new line</span>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span class="hint-item">Mode:</span>
+                    <select id="contentMode" class="mode-selector">
+                        <option value="DEFAULT">STRATEGIC (Default)</option>
+                        <option value="EMAIL">📧 EMAIL FORM</option>
+                        <option value="TABLE">📊 TECH TABLE</option>
+                        <option value="INVOICE">🧾 INVOICE DRAFT</option>
+                    </select>
+                </div>
+                <div style="margin-left: auto; display: flex; gap: 10px;">
+                    <span class="hint-item">Press Enter to send</span>
+                    <span class="hint-item">•</span>
+                    <span class="hint-item">Shift+Enter for new line</span>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
+        // Auth Logic
+        const authModal = document.getElementById('authModal');
+        const authInput = document.getElementById('authInput');
+        const authBtn = document.getElementById('authBtn');
+        const authError = document.getElementById('authError');
+
+        function checkAuth() {
+            if (authInput.value === '000000') {
+                authModal.style.display = 'none';
+                sessionStorage.setItem('blaiq_auth', 'true');
+            } else {
+                authError.style.display = 'block';
+                authInput.value = '';
+                authInput.focus();
+            }
+        }
+
+        // Check session
+        if (sessionStorage.getItem('blaiq_auth') === 'true') {
+            authModal.style.display = 'none';
+        } else {
+            authInput.focus();
+        }
+
+        authBtn.onclick = checkAuth;
+        authInput.onkeydown = (e) => {
+            if (e.key === 'Enter') checkAuth();
+        };
+
         const API_URL = window.location.origin;
         let queryCount = 0;
 
@@ -636,7 +1105,8 @@
             empty: document.getElementById('empty'),
             status: document.getElementById('statusText'),
             dot: document.getElementById('dot'),
-            newChat: document.getElementById('newChat')
+            newChat: document.getElementById('newChat'),
+            mode: document.getElementById('contentMode')
         };
 
         let SESSION_ID = localStorage.getItem('graphrag_session_id');
@@ -726,7 +1196,8 @@
                         mode: "local",
                         use_reranker: false,
                         use_cache: true,
-                        k: 10
+                        k: 10,
+                        content_mode: els.mode.value
                     })
                 });
 
@@ -739,6 +1210,19 @@
                 // Pipeline elements
                 let terminalEl = null;
                 let planningEl = null;
+                let thinkingEl = null;
+                let modeBadgeEl = null;
+                const selectedMode = els.mode.value;
+
+                // Show mode badge if non-default
+                if (selectedMode && selectedMode !== 'DEFAULT') {
+                    modeBadgeEl = document.createElement('div');
+                    const modeClass = selectedMode.toLowerCase();
+                    const modeIcons = { 'TABLE': '📊', 'EMAIL': '📧', 'INVOICE': '🧾' };
+                    modeBadgeEl.className = `mode-badge ${modeClass}`;
+                    modeBadgeEl.innerHTML = `${modeIcons[selectedMode] || '📄'} ${selectedMode} MODE`;
+                    textEl.before(modeBadgeEl);
+                }
 
                 while (true) {
                     const { value, done } = await reader.read();
@@ -768,28 +1252,42 @@
                                     terminalEl.scrollTop = terminalEl.scrollHeight;
                                 }
 
-                                // 2. Handle Planning Tags
+                                // 2. Handle Planning Tags (unified planner output)
                                 if (data.planning) {
+                                    // Remove thinking indicator if it was shown
+                                    if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
+
                                     if (!planningEl) {
                                         planningEl = document.createElement('div');
                                         planningEl.className = 'planning-tag';
                                         textEl.before(planningEl);
                                     }
                                     const p = data.planning;
-                                    const active = Object.keys(p.search_plan).filter(k => p.search_plan[k]).map(k => k.replace('use_', ''));
-                                    planningEl.innerHTML = `🎯 <strong>PLAN:</strong> ${p.mode} &nbsp; | &nbsp; 🧩 <strong>SOURCES:</strong> ${active.join(', ').toUpperCase()}`;
+                                    const active = Object.keys(p.search_plan || {}).filter(k => p.search_plan[k]).map(k => k.replace('use_', ''));
+                                    const entities = (p.entities || []).slice(0, 5).join(', ');
+                                    let html = `🎯 <strong>${p.mode}</strong> &nbsp;|&nbsp; 🧩 ${active.join(', ').toUpperCase()}`;
+                                    if (entities) html += ` &nbsp;|&nbsp; 🔍 ${entities}`;
+                                    planningEl.innerHTML = html;
+
+                                    // Show thinking indicator while retrieval happens
+                                    thinkingEl = document.createElement('div');
+                                    thinkingEl.className = 'thinking-indicator';
+                                    thinkingEl.innerHTML = `<div class="thinking-dots"><span></span><span></span><span></span></div> Retrieving and synthesizing knowledge...`;
+                                    textEl.before(thinkingEl);
                                 }
 
                                 // 3. Handle Streaming Content
                                 if (data.delta || data.answer) {
                                     if (ttfc === null) {
                                         ttfc = Math.round(performance.now() - start);
-                                        // Once content starts, we can optionally collapse the terminal
+                                        // Remove thinking indicator
+                                        if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
+                                        // Collapse terminal
                                         if (terminalEl) terminalEl.style.opacity = "0.7";
                                     }
                                     const content = data.delta || data.answer;
                                     fullText += content;
-                                    textEl.innerHTML = formatMessage(fullText);
+                                    textEl.innerHTML = formatMessage(fullText, true);
                                     els.box.scrollTop = els.box.scrollHeight;
                                 } else if (data.metrics) {
                                     metricsData = data.metrics;
@@ -797,6 +1295,11 @@
                             } catch (e) { }
                         }
                     }
+                }
+
+                // Final render with isStreaming=false for proper formatting
+                if (fullText) {
+                    textEl.innerHTML = formatMessage(fullText, false);
                 }
 
                 // Add sources if metrics available
@@ -815,26 +1318,153 @@
             }
         }
 
-        function formatMessage(text) {
-            // First, protect the thinking/reasoning blocks
-            // Match <Thinking>...</Thinking> or REASONING...ANSWER
+        function formatMessage(text, isStreaming = false) {
             let processed = text;
 
-            // Handle XML-style Reasoning tags - make them look premium
+            // 1. Extract and render <Thinking> blocks
             processed = processed.replace(/<Thinking>([\s\S]*?)<\/Thinking>/gi, (match, content) => {
-                return `<div class="reasoning-block"><div class="reasoning-title">🧠 CORE REASONING</div>${content.trim().replace(/\n/g, '<br>')}</div>`;
+                const bodyHtml = formatThinkingContent(content.trim());
+                return `<div class="reasoning-block collapsed">
+                    <div class="reasoning-title">🧠 CORE REASONING</div>
+                    <div class="reasoning-body">${bodyHtml}</div>
+                    <button class="reasoning-toggle" onclick="toggleReasoning(this)">▼ Show full analysis</button>
+                </div>`;
             });
 
-            // Handle legacy REASONING/ANSWER blocks if present
-            processed = processed.replace(/REASONING\s*\n([\s\S]*?)\n\s*ANSWER/gi, (match, content) => {
-                return `<div class="reasoning-block"><div class="reasoning-title">🧠 REASONING</div>${content.trim().replace(/\n/g, '<br>')}</div><div class="reasoning-title">💬 ANSWER</div>`;
+            // 2. Handle incomplete <Thinking> during streaming (show as live thinking)
+            if (isStreaming && processed.includes('<Thinking>') && !processed.includes('</Thinking>')) {
+                processed = processed.replace(/<Thinking>([\s\S]*)$/gi, (match, content) => {
+                    const bodyHtml = formatThinkingContent(content.trim());
+                    return `<div class="reasoning-block">
+                        <div class="reasoning-title">🧠 ANALYZING
+                            <div class="thinking-dots"><span></span><span></span><span></span></div>
+                        </div>
+                        <div class="reasoning-body">${bodyHtml}</div>
+                    </div>`;
+                });
+            }
+
+            // 3. Handle Markdown tables BEFORE other transforms
+            processed = renderMarkdownTables(processed);
+
+            // 4. Render headers (## and ###)
+            processed = processed.replace(/^### (.+)$/gm, '<div class="response-section"><h3>$1</h3></div>');
+            processed = processed.replace(/^## (.+)$/gm, '<div class="response-section"><h2>$1</h2></div>');
+
+            // 5. Render bullet lists (consecutive lines starting with - or *)
+            processed = renderLists(processed);
+
+            // 6. Render numbered lists
+            processed = renderNumberedLists(processed);
+
+            // 7. Source citations [Source: X]
+            processed = processed.replace(/\*?\*?\[Source:\s*([^\]]+)\]\*?\*?/g,
+                '<span class="source-citation">📄 $1</span>');
+
+            // 8. Confidence indicator
+            processed = processed.replace(/\*?\*?(?:Confidence|Konfidenz|CONFIDENCE)[\s:]*(\d+)%?\*?\*?/gi, (match, pct) => {
+                const p = parseInt(pct);
+                const cls = p >= 75 ? 'high' : p >= 45 ? 'medium' : 'low';
+                return `<div class="confidence-block">
+                    <span class="confidence-label">Confidence</span>
+                    <div class="confidence-bar"><div class="confidence-fill ${cls}" style="width:${p}%"></div></div>
+                    <span class="confidence-value ${cls}">${p}%</span>
+                </div>`;
             });
 
-            // Standard Markdown-ish
-            return processed
+            // 9. Inline formatting
+            processed = processed.replace(/`([^`]+)`/g, '<code class="md-code">$1</code>');
+            processed = processed.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            processed = processed.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
+
+            // 10. Line breaks (but not inside already-rendered HTML)
+            processed = processed.replace(/\n\n/g, '<br><br>');
+            processed = processed.replace(/\n/g, '<br>');
+
+            // 11. Clean up excess <br> after block elements
+            processed = processed.replace(/(<\/div>)\s*(<br\s*\/?>)+/g, '$1');
+            processed = processed.replace(/(<br\s*\/?>)+\s*(<div)/g, '$2');
+
+            return processed;
+        }
+
+        function formatThinkingContent(text) {
+            return text
                 .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-                .replace(/\n\n/g, '<br><br>')
+                .replace(/(\d+)\.\s+/g, '<br><strong>$1.</strong> ')
                 .replace(/\n/g, '<br>');
+        }
+
+        function renderMarkdownTables(text) {
+            // Match markdown table blocks: header row | separator row | data rows
+            const tableRegex = /(?:^|\n)(\|[^\n]+\|)\n(\|[\s:|-]+\|)\n((?:\|[^\n]+\|\n?)+)/g;
+            return text.replace(tableRegex, (match, headerLine, sepLine, bodyLines) => {
+                const headers = headerLine.split('|').filter(c => c.trim()).map(c => c.trim());
+                const rows = bodyLines.trim().split('\n').map(row =>
+                    row.split('|').filter(c => c.trim() !== '').map(c => c.trim())
+                );
+
+                let html = '<div class="md-table-wrapper"><table class="md-table"><thead><tr>';
+                headers.forEach(h => { html += `<th>${h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</th>`; });
+                html += '</tr></thead><tbody>';
+                rows.forEach(row => {
+                    html += '<tr>';
+                    row.forEach(cell => {
+                        html += `<td>${cell.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</td>`;
+                    });
+                    html += '</tr>';
+                });
+                html += '</tbody></table></div>';
+                return html;
+            });
+        }
+
+        function renderLists(text) {
+            const lines = text.split('\n');
+            let result = [];
+            let inList = false;
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const match = line.match(/^[\s]*[-*]\s+(.+)/);
+                if (match) {
+                    if (!inList) { result.push('<ul class="md-list">'); inList = true; }
+                    result.push(`<li>${match[1]}</li>`);
+                } else {
+                    if (inList) { result.push('</ul>'); inList = false; }
+                    result.push(line);
+                }
+            }
+            if (inList) result.push('</ul>');
+            return result.join('\n');
+        }
+
+        function renderNumberedLists(text) {
+            const lines = text.split('\n');
+            let result = [];
+            let inList = false;
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const match = line.match(/^[\s]*(\d+)\.\s+(.+)/);
+                if (match) {
+                    if (!inList) { result.push('<ol class="md-list">'); inList = true; }
+                    result.push(`<li>${match[2]}</li>`);
+                } else {
+                    if (inList) { result.push('</ol>'); inList = false; }
+                    result.push(line);
+                }
+            }
+            if (inList) result.push('</ol>');
+            return result.join('\n');
+        }
+
+        function toggleReasoning(btn) {
+            const block = btn.closest('.reasoning-block');
+            block.classList.toggle('collapsed');
+            btn.textContent = block.classList.contains('collapsed')
+                ? '▼ Show full analysis'
+                : '▲ Collapse';
         }
 
         function appendMessage(role, text, metrics = null, id = null) {
@@ -849,7 +1479,7 @@
                 <div class="message-avatar">${avatar}</div>
                 <div class="message-content">
                     <div class="message-role">${roleName}</div>
-                    <div class="message-text">${formatMessage(text)}</div>
+                    <div class="message-text">${formatMessage(text, false)}</div>
                 </div>
             `;
 
@@ -916,11 +1546,11 @@
                         </div>
                     </div>
                     <div class="timing-row">
-                        <span class="timing-label">Entity Extraction</span>
-                        <span class="timing-value">${Math.round((timings.entity_extraction || 0) * 1000)}ms</span>
+                        <span class="timing-label">Unified Planner</span>
+                        <span class="timing-value">${Math.round((timings.planner || timings.entity_extraction || 0) * 1000)}ms</span>
                     </div>
                     <div class="timing-row">
-                        <span class="timing-label">Retrieval</span>
+                        <span class="timing-label">Parallel Retrieval</span>
                         <span class="timing-value">${Math.round((timings.total_retrieval || 0) * 1000)}ms</span>
                     </div>
                     <div class="timing-row">

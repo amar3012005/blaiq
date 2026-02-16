@@ -14,7 +14,7 @@ services:
       graphrag-optimized: null
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 3s
       retries: 3
@@ -36,7 +36,7 @@ services:
       dockerfile: Dockerfile
     # container_name: graphrag-optimized-e0cwcccswckc8okk4k00skck
     ports:
-      - "${HOST_PORT:-8020}:8001"  # Allow overriding the host port via environment variable (default 8020)
+      - "${HOST_PORT:-8020}:8001" # Allow overriding the host port via environment variable (default 8020)
     volumes:
       # Persistent data directories
       - graphrag_optimized_data:/app/data
@@ -98,29 +98,28 @@ services:
 
     # Optional: SSL command (uncomment if using SSL certificates)
     # command: "uvicorn src.retriever.retriever_api:app --host 0.0.0.0 --port 8001 --ssl-keyfile /certs/privkey.pem --ssl-certfile /certs/fullchain.pem"
-    
+
     depends_on:
       redis:
         condition: service_healthy
-    
+
     networks:
       graphrag-optimized: null
-    
+
     restart: unless-stopped
-    
+
     # DNS configuration for external hostname resolution
     dns:
-      - 1.1.1.1  # Cloudflare
-      - 8.8.8.8  # Google
-      - 8.8.4.4  # Google backup
-    
+      - 8.8.8.8 # Google
+      - 8.8.4.4 # Google backup
+
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8001/" ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
-    
+
     labels:
       - coolify.managed=true
       - coolify.type=service
@@ -131,10 +130,10 @@ services:
       # - traefik.enable=true
       # - traefik.http.routers.graphrag-optimized.rule=Host(`rag-optimized.demo.davinciai.eu`)
       # - traefik.http.services.graphrag-optimized.loadbalancer.server.port=8001
-    
+
     env_file:
       - .env
-    
+
     deploy:
       resources:
         limits:
@@ -143,7 +142,7 @@ services:
         reservations:
           cpus: '2'
           memory: 4G
-    
+
     logging:
       driver: "json-file"
       options:

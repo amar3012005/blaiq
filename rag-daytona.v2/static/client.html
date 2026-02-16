@@ -1,0 +1,1765 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TARA - Daytona RAG Interface</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+    <style>
+        /* ═══════════════════════════════════════════════════════════════════════
+           CSS Custom Properties - Daytona Brand Palette
+           ═══════════════════════════════════════════════════════════════════════ */
+        :root {
+            --color-black: #171717;
+            --color-orange: #F25623;
+            --color-orange-dark: #d94a1d;
+            --color-orange-light: #ff6b3d;
+            --color-dark-gray: #4D4D4D;
+            --color-light-gray: #DEDEDE;
+            --color-white: #FFFFFF;
+            --color-background: #F5F5F5;
+            --color-success: #22c55e;
+            --color-warning: #f59e0b;
+            --color-error: #ef4444;
+            --color-info: #3b82f6;
+            --color-teal: #06b6d4;
+            --color-purple: #8b5cf6;
+            --color-pink: #ec4899;
+
+            --font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            --border-radius: 12px;
+            --border-radius-sm: 8px;
+            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.08);
+            --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.12);
+            --transition: all 0.2s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font-family);
+            background: var(--color-background);
+            color: var(--color-black);
+            min-height: 100vh;
+            line-height: 1.5;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════════
+           Layout
+           ═══════════════════════════════════════════════════════════════════════ */
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            background: var(--color-black);
+            color: var(--color-white);
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .header-brand .logo {
+            width: 36px;
+            height: 36px;
+            background: var(--color-orange);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .header-brand .logo .material-icons-round {
+            font-size: 22px;
+            color: var(--color-white);
+        }
+
+        .header-brand h1 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+        }
+
+        .header-tabs {
+            display: flex;
+            gap: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 4px;
+            border-radius: 8px;
+        }
+
+        .header-tab {
+            padding: 8px 16px;
+            border: none;
+            background: transparent;
+            color: var(--color-light-gray);
+            font-family: var(--font-family);
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .header-tab:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .header-tab.active {
+            background: var(--color-orange);
+            color: var(--color-white);
+        }
+
+        .header-tab .material-icons-round {
+            font-size: 18px;
+        }
+
+        .header-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--color-dark-gray);
+        }
+
+        .status-indicator.connected {
+            background: var(--color-success);
+            box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+        }
+
+        .status-indicator.connecting {
+            background: var(--color-warning);
+            animation: pulse 1.5s infinite;
+        }
+
+        .status-indicator.error {
+            background: var(--color-error);
+        }
+
+        .status-text {
+            font-size: 0.875rem;
+            color: var(--color-light-gray);
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.4;
+            }
+        }
+
+        /* Tab Content */
+        .tab-content {
+            display: none;
+            flex: 1;
+        }
+
+        .tab-content.active {
+            display: flex;
+        }
+
+        /* Main Content - Chat */
+        .main-content {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1fr 300px;
+            gap: 0;
+            height: calc(100vh - 70px);
+        }
+
+        /* Chat Panel */
+        .chat-panel {
+            display: flex;
+            flex-direction: column;
+            background: var(--color-white);
+            border-right: 1px solid var(--color-light-gray);
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .message {
+            max-width: 85%;
+            padding: 14px 18px;
+            border-radius: 16px;
+            font-size: 0.9375rem;
+            line-height: 1.5;
+            animation: slideIn 0.2s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            align-self: flex-end;
+            background: var(--color-black);
+            color: var(--color-white);
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.agent {
+            align-self: flex-start;
+            background: var(--color-background);
+            color: var(--color-black);
+            border-bottom-left-radius: 4px;
+        }
+
+        .message .timestamp {
+            font-size: 0.75rem;
+            opacity: 0.6;
+            margin-top: 6px;
+        }
+
+        /* Chat Input Area */
+        .chat-input-area {
+            padding: 16px 24px 24px;
+            background: var(--color-white);
+            border-top: 1px solid var(--color-light-gray);
+        }
+
+        .input-container {
+            display: flex;
+            align-items: flex-end;
+            gap: 12px;
+            background: var(--color-background);
+            border-radius: var(--border-radius);
+            padding: 8px 12px;
+        }
+
+        .text-input {
+            flex: 1;
+            border: none;
+            background: transparent;
+            font-family: var(--font-family);
+            font-size: 0.9375rem;
+            padding: 8px 4px;
+            resize: none;
+            outline: none;
+            min-height: 24px;
+            max-height: 120px;
+        }
+
+        .send-button {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            border: none;
+            background: var(--color-orange);
+            color: var(--color-white);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: var(--transition);
+        }
+
+        .send-button:hover:not(:disabled) {
+            background: var(--color-orange-dark);
+            transform: scale(1.05);
+        }
+
+        .send-button:disabled {
+            background: var(--color-light-gray);
+            color: var(--color-dark-gray);
+            cursor: not-allowed;
+        }
+
+        /* Controls Panel */
+        .controls-panel {
+            background: var(--color-black);
+            color: var(--color-white);
+            padding: 24px;
+            overflow-y: auto;
+        }
+
+        .panel-section {
+            margin-bottom: 24px;
+        }
+
+        .section-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--color-dark-gray);
+            margin-bottom: 12px;
+        }
+
+        .session-button {
+            width: 100%;
+            padding: 14px 20px;
+            border: none;
+            border-radius: var(--border-radius-sm);
+            font-family: var(--font-family);
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .session-button.start {
+            background: var(--color-orange);
+            color: var(--color-white);
+        }
+
+        .session-button.end {
+            background: transparent;
+            border: 1px solid var(--color-dark-gray);
+            color: var(--color-light-gray);
+        }
+
+        .info-grid {
+            display: grid;
+            gap: 8px;
+        }
+
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: var(--border-radius-sm);
+        }
+
+        .info-label {
+            font-size: 0.8125rem;
+            color: var(--color-dark-gray);
+        }
+
+        .info-value {
+            font-size: 0.8125rem;
+            font-weight: 500;
+            color: var(--color-light-gray);
+            font-family: 'SF Mono', 'Monaco', monospace;
+        }
+
+        .empty-state {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 48px;
+            color: var(--color-dark-gray);
+        }
+
+        .empty-state .material-icons-round {
+            font-size: 64px;
+            margin-bottom: 16px;
+            opacity: 0.3;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════════
+           Hive Mind Visualizer Tab
+           ═══════════════════════════════════════════════════════════════════════ */
+        .visualizer-container {
+            flex: 1;
+            display: flex;
+            background: var(--color-black);
+            height: calc(100vh - 70px);
+        }
+
+        .viz-canvas-container {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #vizCanvas {
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+        }
+
+        .viz-sidebar {
+            width: 320px;
+            background: #1a1a1a;
+            border-left: 1px solid #333;
+            padding: 20px;
+            overflow-y: auto;
+            color: var(--color-white);
+        }
+
+        .viz-header {
+            margin-bottom: 24px;
+        }
+
+        .viz-header h2 {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: var(--color-teal);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .viz-controls {
+            margin-bottom: 24px;
+        }
+
+        .viz-control-group {
+            margin-bottom: 16px;
+        }
+
+        .viz-control-group label {
+            display: block;
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--color-dark-gray);
+            margin-bottom: 8px;
+        }
+
+        .viz-select {
+            width: 100%;
+            padding: 10px 12px;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 6px;
+            color: var(--color-white);
+            font-family: var(--font-family);
+            font-size: 0.875rem;
+            cursor: pointer;
+        }
+
+        .viz-btn {
+            width: 100%;
+            padding: 12px 16px;
+            background: var(--color-teal);
+            border: none;
+            border-radius: 8px;
+            color: var(--color-black);
+            font-family: var(--font-family);
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .viz-btn:hover {
+            background: #14b8a6;
+            transform: translateY(-1px);
+        }
+
+        .viz-btn:disabled {
+            background: #444;
+            color: #888;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .viz-stats {
+            background: #2a2a2a;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }
+
+        .viz-stat-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #333;
+        }
+
+        .viz-stat-item:last-child {
+            border-bottom: none;
+        }
+
+        .viz-stat-label {
+            font-size: 0.8125rem;
+            color: var(--color-dark-gray);
+        }
+
+        .viz-stat-value {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--color-teal);
+            font-family: 'SF Mono', monospace;
+        }
+
+        /* Tooltip */
+        .viz-tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.95);
+            border: 1px solid var(--color-teal);
+            border-radius: 8px;
+            padding: 16px;
+            max-width: 320px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.15s ease;
+            z-index: 1000;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+
+        .viz-tooltip.visible {
+            opacity: 1;
+        }
+
+        .viz-tooltip-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--color-teal);
+            margin-bottom: 8px;
+        }
+
+        .viz-tooltip-issue {
+            font-size: 0.875rem;
+            color: var(--color-white);
+            margin-bottom: 12px;
+            line-height: 1.4;
+        }
+
+        .viz-tooltip-solution {
+            font-size: 0.8125rem;
+            color: var(--color-light-gray);
+            line-height: 1.4;
+        }
+
+        .viz-tooltip-meta {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #444;
+            display: flex;
+            gap: 12px;
+        }
+
+        .viz-tooltip-tag {
+            font-size: 0.6875rem;
+            padding: 4px 8px;
+            background: rgba(6, 182, 212, 0.2);
+            border-radius: 4px;
+            color: var(--color-teal);
+        }
+
+        /* Legend */
+        .viz-legend {
+            background: #2a2a2a;
+            border-radius: 8px;
+            padding: 16px;
+        }
+
+        .viz-legend-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--color-dark-gray);
+            margin-bottom: 12px;
+        }
+
+        .viz-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 0;
+        }
+
+        .viz-legend-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .viz-legend-label {
+            font-size: 0.8125rem;
+            color: var(--color-light-gray);
+        }
+
+        /* Loading State */
+        .viz-loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: var(--color-teal);
+        }
+
+        .viz-loading-spinner {
+            width: 48px;
+            height: 48px;
+            border: 3px solid #333;
+            border-top-color: var(--color-teal);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Point categories colors */
+        .cat-developer {
+            background: var(--color-teal);
+        }
+
+        .cat-startup {
+            background: var(--color-purple);
+        }
+
+        .cat-enterprise {
+            background: var(--color-orange);
+        }
+
+        .cat-devops {
+            background: var(--color-pink);
+        }
+
+        .cat-onboarding {
+            background: var(--color-success);
+        }
+
+        .cat-default {
+            background: var(--color-info);
+        }
+
+        /* Insights Panel Styles */
+        .viz-insights {
+            background: #2a2a2a;
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 16px;
+        }
+
+        .trending-list,
+        .recent-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .trending-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 10px;
+            background: rgba(6, 182, 212, 0.1);
+            border-radius: 6px;
+            border-left: 3px solid var(--color-teal);
+        }
+
+        .trending-item-name {
+            font-size: 0.8125rem;
+            color: var(--color-light-gray);
+            flex: 1;
+        }
+
+        .trending-item-count {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--color-teal);
+            background: rgba(6, 182, 212, 0.2);
+            padding: 2px 8px;
+            border-radius: 10px;
+        }
+
+        .trending-item-bar {
+            height: 4px;
+            background: linear-gradient(90deg, var(--color-teal), transparent);
+            border-radius: 2px;
+            margin-top: 4px;
+        }
+
+        .recent-item {
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 6px;
+            border-left: 3px solid var(--color-purple);
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .recent-item:hover {
+            background: rgba(255, 255, 255, 0.08);
+            transform: translateX(4px);
+        }
+
+        .recent-item-issue {
+            font-size: 0.8125rem;
+            color: var(--color-light-gray);
+            line-height: 1.4;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .recent-item-meta {
+            display: flex;
+            gap: 8px;
+            margin-top: 6px;
+        }
+
+        .recent-item-tag {
+            font-size: 0.6875rem;
+            padding: 2px 6px;
+            background: rgba(139, 92, 246, 0.2);
+            border-radius: 4px;
+            color: var(--color-purple);
+        }
+
+        .loading-placeholder {
+            font-size: 0.8125rem;
+            color: var(--color-dark-gray);
+            padding: 12px;
+            text-align: center;
+        }
+
+        @media (max-width: 768px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+
+            .controls-panel,
+            .viz-sidebar {
+                display: none;
+            }
+
+            .header-tabs {
+                display: none;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-brand">
+                <div class="logo">
+                    <span class="material-icons-round">library_books</span>
+                </div>
+                <h1>TARA RAG V2</h1>
+            </div>
+            <div class="header-tabs">
+                <button class="header-tab active" data-tab="chat">
+                    <span class="material-icons-round">chat</span>
+                    Chat
+                </button>
+                <button class="header-tab" data-tab="visualizer">
+                    <span class="material-icons-round">bubble_chart</span>
+                    Hive Mind
+                </button>
+            </div>
+            <div class="header-status">
+                <div class="status-indicator" id="statusIndicator"></div>
+                <span class="status-text" id="statusText">Disconnected</span>
+            </div>
+        </header>
+
+        <!-- Chat Tab -->
+        <div class="tab-content active" id="chatTab">
+            <main class="main-content">
+                <div class="chat-panel">
+                    <div class="chat-messages" id="chatMessages">
+                        <div class="empty-state" id="emptyState">
+                            <span class="material-icons-round">chat_bubble_outline</span>
+                            <h3>Knowledge Base Assistant</h3>
+                            <p>Ask questions about Daytona documentation</p>
+                        </div>
+                    </div>
+                    <div class="chat-input-area">
+                        <div class="input-container">
+                            <textarea class="text-input" id="textInput" placeholder="Ask a question..." rows="1"
+                                disabled></textarea>
+                            <button class="send-button" id="sendButton" disabled title="Send message">
+                                <span class="material-icons-round">send</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <aside class="controls-panel">
+                    <div class="panel-section">
+                        <h4 class="section-title">Session</h4>
+                        <button class="session-button start" id="startSession">
+                            <span class="material-icons-round">play_arrow</span>
+                            Start Session
+                        </button>
+                        <button class="session-button end hidden" id="endSession">
+                            <span class="material-icons-round">stop</span>
+                            End Session
+                        </button>
+                    </div>
+                    <div class="panel-section">
+                        <h4 class="section-title">Metrics</h4>
+                        <div class="info-grid">
+                            <div class="info-item">
+                                <span class="info-label">Latency</span>
+                                <span class="info-value" id="lastLatency">-</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Queries</span>
+                                <span class="info-value" id="totalQueries">0</span>
+                            </div>
+                        </div>
+                    </div>
+                </aside>
+            </main>
+        </div>
+
+        <!-- Hive Mind Visualizer Tab -->
+        <div class="tab-content" id="visualizerTab">
+            <div class="visualizer-container">
+                <div class="viz-canvas-container">
+                    <canvas id="vizCanvas"></canvas>
+                    <div class="viz-tooltip" id="vizTooltip">
+                        <div class="viz-tooltip-title">Issue</div>
+                        <div class="viz-tooltip-issue" id="tooltipIssue"></div>
+                        <div class="viz-tooltip-title">Solution</div>
+                        <div class="viz-tooltip-solution" id="tooltipSolution"></div>
+                        <div class="viz-tooltip-meta">
+                            <span class="viz-tooltip-tag" id="tooltipType"></span>
+                            <span class="viz-tooltip-tag" id="tooltipSegment"></span>
+                        </div>
+                    </div>
+                    <div class="viz-loading hidden" id="vizLoading">
+                        <div class="viz-loading-spinner"></div>
+                        <div>Computing t-SNE projection...</div>
+                    </div>
+                </div>
+                <aside class="viz-sidebar">
+                    <div class="viz-header">
+                        <h2>
+                            <span class="material-icons-round">psychology</span>
+                            Hive Mind Explorer
+                        </h2>
+                    </div>
+                    <div class="viz-controls">
+                        <div class="viz-control-group">
+                            <label>Algorithm</label>
+                            <select class="viz-select" id="algorithmSelect">
+                                <option value="tsne" selected>t-SNE (Recommended)</option>
+                                <option value="pca">PCA (Faster)</option>
+                            </select>
+                        </div>
+                        <div class="viz-control-group">
+                            <label>Max Points</label>
+                            <select class="viz-select" id="limitSelect">
+                                <option value="50">50 points</option>
+                                <option value="100" selected>100 points</option>
+                                <option value="200">200 points</option>
+                                <option value="500">500 points</option>
+                            </select>
+                        </div>
+                        <button class="viz-btn" id="loadVizBtn">
+                            <span class="material-icons-round">refresh</span>
+                            Load Visualization
+                        </button>
+                    </div>
+                    <div class="viz-stats">
+                        <div class="viz-stat-item">
+                            <span class="viz-stat-label">Collection</span>
+                            <span class="viz-stat-value" id="statCollection">-</span>
+                        </div>
+                        <div class="viz-stat-item">
+                            <span class="viz-stat-label">Points</span>
+                            <span class="viz-stat-value" id="statPoints">0</span>
+                        </div>
+                        <div class="viz-stat-item">
+                            <span class="viz-stat-label">Dimension</span>
+                            <span class="viz-stat-value" id="statDimension">384</span>
+                        </div>
+                        <div class="viz-stat-item">
+                            <span class="viz-stat-label">Algorithm</span>
+                            <span class="viz-stat-value" id="statAlgorithm">t-SNE</span>
+                        </div>
+                    </div>
+                    <div class="viz-legend">
+                        <div class="viz-legend-title">Customer Segments</div>
+                        <div class="viz-legend-item">
+                            <div class="viz-legend-dot cat-developer"></div>
+                            <span class="viz-legend-label">Developer</span>
+                        </div>
+                        <div class="viz-legend-item">
+                            <div class="viz-legend-dot cat-startup"></div>
+                            <span class="viz-legend-label">Startup</span>
+                        </div>
+                        <div class="viz-legend-item">
+                            <div class="viz-legend-dot cat-enterprise"></div>
+                            <span class="viz-legend-label">Enterprise</span>
+                        </div>
+                        <div class="viz-legend-item">
+                            <div class="viz-legend-dot cat-devops"></div>
+                            <span class="viz-legend-label">DevOps</span>
+                        </div>
+                        <div class="viz-legend-item">
+                            <div class="viz-legend-dot cat-onboarding"></div>
+                            <span class="viz-legend-label">Onboarding</span>
+                        </div>
+                    </div>
+
+                    <!-- Trending Domains -->
+                    <div class="viz-insights" id="insightsPanel">
+                        <div class="viz-legend-title">
+                            <span class="material-icons-round"
+                                style="font-size: 14px; vertical-align: middle;">trending_up</span>
+                            Trending Domains
+                        </div>
+                        <div id="trendingDomains" class="trending-list">
+                            <div class="loading-placeholder">Loading insights...</div>
+                        </div>
+                    </div>
+
+                    <!-- Recent Knowledge -->
+                    <div class="viz-insights" style="margin-top: 16px;">
+                        <div class="viz-legend-title">
+                            <span class="material-icons-round"
+                                style="font-size: 14px; vertical-align: middle;">history</span>
+                            Recent Knowledge
+                        </div>
+                        <div id="recentKnowledge" class="recent-list">
+                            <div class="loading-placeholder">Loading...</div>
+                        </div>
+                    </div>
+                </aside>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ═══════════════════════════════════════════════════════════════════════
+        // GLOBAL CONFIGURATION - Must run before anything else!
+        // ═══════════════════════════════════════════════════════════════════════
+        (function () {
+            let basePath = window.location.pathname.replace(/\/+$/, '');
+            if (basePath.endsWith('index.html') || basePath.endsWith('client.html')) {
+                basePath = basePath.substring(0, basePath.lastIndexOf('/'));
+            }
+            // Expose globally
+            window.API_BASE = window.location.protocol + '//' + window.location.host + basePath;
+            console.log('🌍 TARA RAG Configured API_BASE:', window.API_BASE);
+        })();
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // Tab Navigation
+        // ═══════════════════════════════════════════════════════════════════════
+        document.querySelectorAll('.header-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.header-tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById(tab.dataset.tab + 'Tab').classList.add('active');
+
+                if (tab.dataset.tab === 'visualizer') {
+                    // Resize canvas now that tab is visible
+                    setTimeout(() => {
+                        if (window.hiveMindViz) {
+                            window.hiveMindViz.resizeCanvas();
+                            if (!window.vizData) {
+                                // Auto-load on first visit
+                                window.hiveMindViz.loadData();
+                            }
+                        }
+                    }, 50); // Small delay to ensure tab is fully rendered
+                }
+            });
+        });
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // Hive Mind Visualizer
+        // ═══════════════════════════════════════════════════════════════════════
+        class HiveMindVisualizer {
+            constructor() {
+                this.canvas = document.getElementById('vizCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.tooltip = document.getElementById('vizTooltip');
+                this.loading = document.getElementById('vizLoading');
+                this.points = [];
+                this.hoveredPoint = null;
+                this.scale = 1;
+                this.offset = { x: 0, y: 0 };
+
+                this.colors = {
+                    'developer': '#06b6d4',
+                    'startup': '#8b5cf6',
+                    'enterprise': '#F25623',
+                    'devops': '#ec4899',
+                    'onboarding': '#22c55e',
+                    'default': '#3b82f6'
+                };
+
+                this.setupCanvas();
+                this.setupEvents();
+                this.connectWebSocket();
+            }
+
+            setupCanvas() {
+                this.resizeCanvas = () => {
+                    const container = this.canvas.parentElement;
+                    const rect = container.getBoundingClientRect();
+
+                    // Only resize if container has dimensions
+                    if (rect.width > 0 && rect.height > 0) {
+                        const dpr = window.devicePixelRatio || 1;
+                        this.canvas.width = rect.width * dpr;
+                        this.canvas.height = rect.height * dpr;
+                        this.canvas.style.width = rect.width + 'px';
+                        this.canvas.style.height = rect.height + 'px';
+                        this.ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
+                        this.ctx.scale(dpr, dpr);
+                        this.render();
+                    }
+                };
+
+                // Initial resize (may be 0 if tab hidden)
+                this.resizeCanvas();
+                window.addEventListener('resize', this.resizeCanvas);
+            }
+
+            setupEvents() {
+                document.getElementById('loadVizBtn').addEventListener('click', () => this.loadData());
+
+                this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
+                this.canvas.addEventListener('mouseleave', () => this.hideTooltip());
+                this.canvas.addEventListener('wheel', (e) => this.handleZoom(e));
+            }
+
+            connectWebSocket() {
+                try {
+                    const baseUrl = window.API_BASE || '';
+                    let wsUrl;
+
+                    if (baseUrl.startsWith('http')) {
+                        wsUrl = baseUrl.replace('http', 'ws') + '/ws/hive-mind';
+                    } else {
+                        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                        wsUrl = `${protocol}//${window.location.host}${baseUrl}/ws/hive-mind`;
+                    }
+
+                    console.log('🔌 Connecting to Hive Mind WebSocket:', wsUrl);
+                    this.ws = new WebSocket(wsUrl);
+
+                    this.ws.onopen = () => {
+                        console.log('✅ Hive Mind WebSocket connected');
+                    };
+
+                    this.ws.onmessage = (event) => {
+                        try {
+                            const data = JSON.parse(event.data);
+                            if (data.type === 'new_knowledge') {
+                                console.log('✨ New knowledge received via WebSocket:', data.node);
+                                // Refresh to get the new projection
+                                this.loadData();
+                                // Also refresh insights
+                                if (typeof loadHiveMindInsights === 'function') {
+                                    loadHiveMindInsights();
+                                }
+                            }
+                        } catch (e) {
+                            console.error('Error parsing WebSocket message:', e);
+                        }
+                    };
+
+                    this.ws.onclose = () => {
+                        console.log('🔌 Hive Mind WebSocket disconnected. Reconnecting in 5s...');
+                        setTimeout(() => this.connectWebSocket(), 5000);
+                    };
+
+                    this.ws.onerror = (err) => {
+                        console.error('❌ Hive Mind WebSocket error:', err);
+                    };
+                } catch (e) {
+                    console.error('Failed to initialize Hive Mind WebSocket:', e);
+                }
+            }
+
+            async loadData() {
+                const algorithm = document.getElementById('algorithmSelect').value;
+                const limit = document.getElementById('limitSelect').value;
+
+                this.loading.classList.remove('hidden');
+
+                try {
+                    // Use global API_BASE if available, otherwise relative path
+                    const baseUrl = window.API_BASE || '';
+                    const response = await fetch(
+                        `${baseUrl}/api/v1/hive-mind/visualize?algorithm=${algorithm}&limit=${limit}`
+                    );
+
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+                    const data = await response.json();
+                    window.vizData = data;
+                    this.points = data.points;
+
+                    // Update stats
+                    document.getElementById('statCollection').textContent = data.collection_name;
+                    document.getElementById('statPoints').textContent = data.total_points;
+                    document.getElementById('statDimension').textContent = data.dimension + '-D';
+                    document.getElementById('statAlgorithm').textContent = data.algorithm.toUpperCase();
+
+                    // Ensure canvas is properly sized before rendering
+                    this.resizeCanvas();
+                } catch (err) {
+                    console.error('Visualization load error:', err);
+                    alert('Failed to load Hive Mind data. Check console for details.');
+                } finally {
+                    this.loading.classList.add('hidden');
+                }
+            }
+
+            render() {
+                const dpr = window.devicePixelRatio || 1;
+                const w = this.canvas.width / dpr;
+                const h = this.canvas.height / dpr;
+
+                // Skip rendering if canvas has no dimensions
+                if (w <= 0 || h <= 0) {
+                    console.log('Canvas has no dimensions, skipping render');
+                    return;
+                }
+
+                // Clear
+                this.ctx.fillStyle = '#171717';
+                this.ctx.fillRect(0, 0, w, h);
+
+                // Grid
+                this.ctx.strokeStyle = '#333';
+                this.ctx.lineWidth = 0.5;
+                const gridSize = 50;
+                for (let x = 0; x < w; x += gridSize) {
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(x, 0);
+                    this.ctx.lineTo(x, h);
+                    this.ctx.stroke();
+                }
+                for (let y = 0; y < h; y += gridSize) {
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(0, y);
+                    this.ctx.lineTo(w, y);
+                    this.ctx.stroke();
+                }
+
+                if (!this.points.length) {
+                    this.ctx.fillStyle = '#666';
+                    this.ctx.font = '16px Inter, sans-serif';
+                    this.ctx.textAlign = 'center';
+                    this.ctx.fillText('Click "Load Visualization" to fetch Hive Mind data', w / 2, h / 2);
+                    return;
+                }
+
+                // Calculate layout
+                const padding = 80;
+                const scaleX = (w - padding * 2) / 2;
+                const scaleY = (h - padding * 2) / 2;
+                const centerX = w / 2;
+                const centerY = h / 2;
+
+                // Group points by issue_type for semantic connections
+                const typeGroups = {};
+                this.points.forEach(p => {
+                    const type = p.issue_type || 'general';
+                    if (!typeGroups[type]) typeGroups[type] = [];
+                    typeGroups[type].push(p);
+                });
+
+                // Draw semantic connections (same issue_type = related knowledge)
+                Object.values(typeGroups).forEach(group => {
+                    if (group.length > 1) {
+                        // Connect all points in same category
+                        for (let i = 0; i < group.length; i++) {
+                            for (let j = i + 1; j < group.length; j++) {
+                                const p1 = group[i];
+                                const p2 = group[j];
+                                const x1 = centerX + p1.x * scaleX;
+                                const y1 = centerY + p1.y * scaleY;
+                                const x2 = centerX + p2.x * scaleX;
+                                const y2 = centerY + p2.y * scaleY;
+
+                                const color = this.colors[p1.customer_segment] || this.colors.default;
+
+                                // Gradient line
+                                const gradient = this.ctx.createLinearGradient(x1, y1, x2, y2);
+                                gradient.addColorStop(0, color + '40');
+                                gradient.addColorStop(0.5, color + '80');
+                                gradient.addColorStop(1, color + '40');
+
+                                this.ctx.strokeStyle = gradient;
+                                this.ctx.lineWidth = 2;
+                                this.ctx.beginPath();
+                                this.ctx.moveTo(x1, y1);
+                                this.ctx.lineTo(x2, y2);
+                                this.ctx.stroke();
+                            }
+                        }
+                    }
+                });
+
+                // Draw cluster labels
+                const typePositions = {};
+                Object.entries(typeGroups).forEach(([type, points]) => {
+                    // Calculate centroid
+                    const avgX = points.reduce((sum, p) => sum + p.x, 0) / points.length;
+                    const avgY = points.reduce((sum, p) => sum + p.y, 0) / points.length;
+                    typePositions[type] = { x: avgX, y: avgY, count: points.length };
+                });
+
+                // Draw cluster label backgrounds
+                this.ctx.font = '11px Inter, sans-serif';
+                Object.entries(typePositions).forEach(([type, pos]) => {
+                    const x = centerX + pos.x * scaleX;
+                    const y = centerY + pos.y * scaleY - 30;
+                    const label = type.replace(/_/g, ' ').toUpperCase();
+                    const textWidth = this.ctx.measureText(label).width;
+
+                    // Background pill
+                    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                    this.ctx.beginPath();
+                    this.ctx.roundRect(x - textWidth / 2 - 8, y - 8, textWidth + 16, 20, 10);
+                    this.ctx.fill();
+
+                    // Label text
+                    this.ctx.fillStyle = '#06b6d4';
+                    this.ctx.textAlign = 'center';
+                    this.ctx.fillText(label, x, y + 5);
+
+                    // Count badge
+                    this.ctx.fillStyle = '#06b6d4';
+                    this.ctx.beginPath();
+                    this.ctx.arc(x + textWidth / 2 + 12, y, 10, 0, Math.PI * 2);
+                    this.ctx.fill();
+                    this.ctx.fillStyle = '#000';
+                    this.ctx.font = 'bold 9px Inter, sans-serif';
+                    this.ctx.fillText(pos.count.toString(), x + textWidth / 2 + 12, y + 3);
+                });
+
+                // Draw neural network-style animated pulse effect
+                const time = Date.now() / 1000;
+                this.points.forEach((point, i) => {
+                    const x = centerX + point.x * scaleX;
+                    const y = centerY + point.y * scaleY;
+                    const pulsePhase = (time + i * 0.3) % 2;
+
+                    if (pulsePhase < 1) {
+                        const pulseRadius = 8 + pulsePhase * 30;
+                        const pulseAlpha = 0.3 * (1 - pulsePhase);
+                        const color = this.colors[point.customer_segment] || this.colors.default;
+
+                        this.ctx.beginPath();
+                        this.ctx.strokeStyle = color.replace(')', `, ${pulseAlpha})`).replace('rgb', 'rgba');
+                        this.ctx.lineWidth = 2;
+                        this.ctx.arc(x, y, pulseRadius, 0, Math.PI * 2);
+                        this.ctx.stroke();
+                    }
+                });
+
+                // Draw knowledge nodes
+                this.points.forEach(point => {
+                    const x = centerX + point.x * scaleX;
+                    const y = centerY + point.y * scaleY;
+                    const color = this.colors[point.customer_segment] || this.colors.default;
+                    const isHovered = point === this.hoveredPoint;
+                    const radius = isHovered ? 14 : 10;
+
+                    // Outer glow
+                    const glowGradient = this.ctx.createRadialGradient(x, y, 0, x, y, radius * 3);
+                    glowGradient.addColorStop(0, color);
+                    glowGradient.addColorStop(0.3, color + '60');
+                    glowGradient.addColorStop(1, 'transparent');
+                    this.ctx.fillStyle = glowGradient;
+                    this.ctx.beginPath();
+                    this.ctx.arc(x, y, radius * 3, 0, Math.PI * 2);
+                    this.ctx.fill();
+
+                    // Inner solid circle
+                    this.ctx.beginPath();
+                    this.ctx.fillStyle = color;
+                    this.ctx.arc(x, y, radius, 0, Math.PI * 2);
+                    this.ctx.fill();
+
+                    // White core (knowledge light)
+                    this.ctx.beginPath();
+                    this.ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+                    this.ctx.arc(x - radius / 3, y - radius / 3, radius / 3, 0, Math.PI * 2);
+                    this.ctx.fill();
+
+                    // Hover ring
+                    if (isHovered) {
+                        this.ctx.beginPath();
+                        this.ctx.strokeStyle = '#fff';
+                        this.ctx.lineWidth = 3;
+                        this.ctx.arc(x, y, radius + 4, 0, Math.PI * 2);
+                        this.ctx.stroke();
+                    }
+                });
+
+                // Draw title
+                this.ctx.font = 'bold 14px Inter, sans-serif';
+                this.ctx.fillStyle = '#888';
+                this.ctx.textAlign = 'left';
+                this.ctx.fillText('COLLECTIVE INTELLIGENCE NETWORK', 20, 30);
+
+                // Draw stats
+                this.ctx.font = '12px Inter, sans-serif';
+                this.ctx.fillStyle = '#06b6d4';
+                this.ctx.fillText(`${this.points.length} knowledge nodes • ${Object.keys(typeGroups).length} domains`, 20, 50);
+
+                // Request next frame for animation
+                if (!this._animationFrame) {
+                    this._animationFrame = requestAnimationFrame(() => {
+                        this._animationFrame = null;
+                        this.render();
+                    });
+                }
+            }
+
+            handleMouseMove(e) {
+                const rect = this.canvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+
+                const w = rect.width;
+                const h = rect.height;
+                const padding = 60;
+                const scaleX = (w - padding * 2) / 2;
+                const scaleY = (h - padding * 2) / 2;
+                const centerX = w / 2;
+                const centerY = h / 2;
+
+                // Find closest point
+                let closest = null;
+                let minDist = 20; // Threshold in pixels
+
+                this.points.forEach(point => {
+                    const x = centerX + point.x * scaleX;
+                    const y = centerY + point.y * scaleY;
+                    const dist = Math.hypot(mouseX - x, mouseY - y);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        closest = point;
+                    }
+                });
+
+                if (closest !== this.hoveredPoint) {
+                    this.hoveredPoint = closest;
+                    this.render();
+
+                    if (closest) {
+                        this.showTooltip(closest, e.clientX, e.clientY);
+                    } else {
+                        this.hideTooltip();
+                    }
+                } else if (closest) {
+                    // Update tooltip position
+                    this.positionTooltip(e.clientX, e.clientY);
+                }
+            }
+
+            showTooltip(point, x, y) {
+                document.getElementById('tooltipIssue').textContent = point.issue;
+                document.getElementById('tooltipSolution').textContent =
+                    point.solution.length > 200 ? point.solution.slice(0, 200) + '...' : point.solution;
+                document.getElementById('tooltipType').textContent = point.issue_type || 'general';
+                document.getElementById('tooltipSegment').textContent = point.customer_segment || 'unknown';
+
+                this.positionTooltip(x, y);
+                this.tooltip.classList.add('visible');
+            }
+
+            positionTooltip(x, y) {
+                const tooltipRect = this.tooltip.getBoundingClientRect();
+                const canvasRect = this.canvas.getBoundingClientRect();
+
+                let left = x - canvasRect.left + 20;
+                let top = y - canvasRect.top - 20;
+
+                // Keep tooltip in bounds
+                if (left + tooltipRect.width > canvasRect.width - 20) {
+                    left = x - canvasRect.left - tooltipRect.width - 20;
+                }
+                if (top + tooltipRect.height > canvasRect.height - 20) {
+                    top = y - canvasRect.top - tooltipRect.height - 20;
+                }
+                if (top < 20) top = 20;
+
+                this.tooltip.style.left = left + 'px';
+                this.tooltip.style.top = top + 'px';
+            }
+
+            hideTooltip() {
+                this.tooltip.classList.remove('visible');
+                this.hoveredPoint = null;
+                this.render();
+            }
+
+            handleZoom(e) {
+                e.preventDefault();
+                const delta = e.deltaY > 0 ? 0.9 : 1.1;
+                this.scale = Math.max(0.5, Math.min(3, this.scale * delta));
+                this.render();
+            }
+        }
+
+        window.hiveMindViz = new HiveMindVisualizer();
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // Insights Loader
+        // ═══════════════════════════════════════════════════════════════════════
+        async function loadHiveMindInsights() {
+            const trendingEl = document.getElementById('trendingDomains');
+            const recentEl = document.getElementById('recentKnowledge');
+
+            try {
+                // Use global API_BASE if available
+                const baseUrl = window.API_BASE || '';
+                const response = await fetch(`${baseUrl}/api/v1/hive-mind/insights?limit=5`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+                const data = await response.json();
+
+                // Render trending domains
+                if (data.trending_domains && data.trending_domains.length > 0) {
+                    trendingEl.innerHTML = data.trending_domains.map(domain => `
+                        <div class="trending-item">
+                            <span class="trending-item-name">${domain.domain}</span>
+                            <span class="trending-item-count">${domain.count}</span>
+                        </div>
+                        <div class="trending-item-bar" style="width: ${domain.percentage}%"></div>
+                    `).join('');
+                } else {
+                    trendingEl.innerHTML = '<div class="loading-placeholder">No domains yet</div>';
+                }
+
+                // Render recent knowledge
+                if (data.recent_knowledge && data.recent_knowledge.length > 0) {
+                    recentEl.innerHTML = data.recent_knowledge.slice(0, 5).map(item => `
+                        <div class="recent-item" title="${item.solution}">
+                            <div class="recent-item-issue">${item.issue}</div>
+                            <div class="recent-item-meta">
+                                ${item.issue_type ? `<span class="recent-item-tag">${item.issue_type.replace(/_/g, ' ')}</span>` : ''}
+                                ${item.customer_segment ? `<span class="recent-item-tag">${item.customer_segment}</span>` : ''}
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    recentEl.innerHTML = '<div class="loading-placeholder">No knowledge yet</div>';
+                }
+
+                console.log(`📊 Insights loaded: ${data.total_knowledge} nodes, ${data.unique_domains} domains`);
+
+            } catch (err) {
+                console.error('Failed to load insights:', err);
+                trendingEl.innerHTML = '<div class="loading-placeholder">Failed to load</div>';
+                recentEl.innerHTML = '<div class="loading-placeholder">Failed to load</div>';
+            }
+        }
+
+        // Load insights when switching to visualizer tab
+        const originalTabHandler = document.querySelectorAll('.header-tab')[1];
+        if (originalTabHandler) {
+            originalTabHandler.addEventListener('click', () => {
+                setTimeout(loadHiveMindInsights, 100);
+            });
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // RAG Client Logic
+        // ═══════════════════════════════════════════════════════════════════════
+
+        const QUERY_ENDPOINT = `${window.API_BASE}/api/v1/query`;
+        const HEALTH_ENDPOINT = `${window.API_BASE}/health`;
+
+        class RAGClient {
+            constructor() {
+                this.sessionId = null;
+                this.history = [];
+                this.sessionActive = false;
+                this.metrics = { queries: 0 };
+
+                this.setupUI();
+                this.checkHealth();
+            }
+
+            setupUI() {
+                this.chatMessages = document.getElementById('chatMessages');
+                this.textInput = document.getElementById('textInput');
+                this.sendButton = document.getElementById('sendButton');
+                this.startSessionBtn = document.getElementById('startSession');
+                this.endSessionBtn = document.getElementById('endSession');
+                this.emptyState = document.getElementById('emptyState');
+                this.statusIndicator = document.getElementById('statusIndicator');
+                this.statusText = document.getElementById('statusText');
+                this.lastLatencyEl = document.getElementById('lastLatency');
+                this.totalQueriesEl = document.getElementById('totalQueries');
+
+                this.startSessionBtn.onclick = () => this.startSession();
+                this.endSessionBtn.onclick = () => this.endSession();
+                this.sendButton.onclick = () => this.sendMessage();
+
+                this.textInput.onkeydown = (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        this.sendMessage();
+                    }
+                };
+
+                this.textInput.oninput = function () {
+                    this.style.height = 'auto';
+                    this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+                };
+            }
+
+            async checkHealth() {
+                try {
+                    this.updateStatus('connecting', 'Checking health...');
+                    const res = await fetch(HEALTH_ENDPOINT);
+                    if (res.ok) {
+                        this.updateStatus('connected', 'Service Ready');
+                    } else {
+                        this.updateStatus('error', 'Service Unhealthy');
+                    }
+                } catch (e) {
+                    this.updateStatus('error', 'Disconnected');
+                }
+            }
+
+            updateStatus(state, text) {
+                this.statusIndicator.className = `status-indicator ${state}`;
+                this.statusText.textContent = text;
+            }
+
+            startSession() {
+                this.sessionId = `sess_${Date.now()}`;
+                this.sessionActive = true;
+                this.history = [];
+
+                this.startSessionBtn.classList.add('hidden');
+                this.endSessionBtn.classList.remove('hidden');
+                this.textInput.disabled = false;
+                this.sendButton.disabled = false;
+                this.emptyState.classList.add('hidden');
+
+                this.updateStatus('connected', 'Session Active');
+                this.appendMessage('system', 'Session started. How can I help you today?');
+            }
+
+            endSession() {
+                this.sessionActive = false;
+                this.sessionId = null;
+
+                this.startSessionBtn.classList.remove('hidden');
+                this.endSessionBtn.classList.add('hidden');
+                this.textInput.disabled = true;
+                this.sendButton.disabled = true;
+                this.emptyState.classList.remove('hidden');
+                this.chatMessages.innerHTML = '';
+                this.chatMessages.appendChild(this.emptyState);
+
+                this.updateStatus('connected', 'Service Ready');
+            }
+
+            async sendMessage() {
+                const text = this.textInput.value.trim();
+                if (!text || !this.sessionActive) return;
+
+                this.textInput.value = '';
+                this.textInput.style.height = 'auto';
+                this.appendMessage('user', text);
+                this.updateStatus('connecting', 'Thinking...');
+
+                const startTime = performance.now();
+
+                try {
+                    const payload = {
+                        query: text,
+                        history_context: this.history,
+                        context: { session_id: this.sessionId }
+                    };
+
+                    const response = await fetch(QUERY_ENDPOINT, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+                    const data = await response.json();
+                    const latency = Math.round(performance.now() - startTime);
+
+                    this.metrics.queries++;
+                    this.totalQueriesEl.textContent = this.metrics.queries;
+                    this.lastLatencyEl.textContent = `${latency}ms`;
+
+                    this.history.push({ role: 'user', content: text });
+                    this.history.push({ role: 'assistant', content: data.answer });
+
+                    // Pass full data object for rich rendering
+                    this.appendMessage('agent', data);
+                    this.updateStatus('connected', 'Session Active');
+
+                } catch (e) {
+                    console.error('Query error:', e);
+                    this.appendMessage('agent', 'Sorry, I encountered an error connecting to the service.');
+                    this.updateStatus('error', 'Connection Error');
+                }
+            }
+
+            appendMessage(role, content) {
+                const div = document.createElement('div');
+                div.className = `message ${role}`;
+
+                if (typeof content === 'string') {
+                    // Simple text message
+                    div.textContent = content;
+                } else if (role === 'agent' && typeof content === 'object') {
+                    // Rich agent response with metrics
+                    const textDiv = document.createElement('div');
+                    textDiv.style.marginBottom = '8px';
+                    // Preserve whitespace/newlines
+                    textDiv.style.whiteSpace = 'pre-wrap';
+                    textDiv.textContent = content.answer;
+                    div.appendChild(textDiv);
+
+                    // Metadata Section
+                    const metaDiv = document.createElement('div');
+                    metaDiv.style.fontSize = '0.75rem';
+                    metaDiv.style.opacity = '0.85';
+                    metaDiv.style.borderTop = '1px solid rgba(0,0,0,0.1)'; // Dark text on light bg
+                    // For dark mode/agent messages (which are gray/white depending on exact css?)
+                    // Agent messages are: background: var(--color-background) -> #F5F5F5 (Light Gray)
+                    // Text color: var(--color-black)
+
+                    metaDiv.style.paddingTop = '8px';
+                    metaDiv.style.marginTop = '8px';
+                    metaDiv.style.display = 'flex';
+                    metaDiv.style.flexDirection = 'column';
+                    metaDiv.style.gap = '4px';
+
+                    // 1. Stats Row
+                    let stats = [];
+                    if (content.confidence) {
+                        const confPct = (content.confidence * 100).toFixed(0);
+                        stats.push(`Confidence: <b>${confPct}%</b>`);
+                    }
+                    if (content.timing_breakdown) {
+                        const t = content.timing_breakdown;
+                        if (t.total_ms) stats.push(`Latency: <b>${t.total_ms.toFixed(0)}ms</b>`);
+                        // If TTFT is available
+                        if (t.first_chunk_ms) stats.push(`TTFT: <b>${t.first_chunk_ms.toFixed(0)}ms</b>`);
+                    }
+
+                    if (stats.length > 0) {
+                        const statsEl = document.createElement('div');
+                        statsEl.innerHTML = stats.join(' • ');
+                        metaDiv.appendChild(statsEl);
+                    }
+
+                    // 2. Sources Row
+                    if (content.sources && content.sources.length > 0) {
+                        const sourcesEl = document.createElement('div');
+                        sourcesEl.style.display = 'flex';
+                        sourcesEl.style.gap = '4px';
+                        sourcesEl.style.alignItems = 'center';
+
+                        const icon = document.createElement('span');
+                        icon.className = 'material-icons-round';
+                        icon.style.fontSize = '12px';
+                        icon.textContent = 'description';
+                        sourcesEl.appendChild(icon);
+
+                        const text = document.createElement('span');
+                        // Show first 3 sources, clean up filenames
+                        const cleanSources = content.sources
+                            .slice(0, 3)
+                            .map(s => s.split('/').pop())
+                            .join(', ');
+                        text.textContent = cleanSources + (content.sources.length > 3 ? ` +${content.sources.length - 3}` : '');
+                        sourcesEl.appendChild(text);
+
+                        metaDiv.appendChild(sourcesEl);
+                    }
+
+                    // 3. Hive Mind Info (if available in metadata)
+                    if (content.metadata && content.metadata.hive_mind_context) {
+                        const hmEl = document.createElement('div');
+                        hmEl.innerHTML = `<span style="color:#8b5cf6">●</span> Hive Mind Enhanced`;
+                        metaDiv.appendChild(hmEl);
+                    }
+
+                    div.appendChild(metaDiv);
+                }
+
+                const time = document.createElement('div');
+                time.className = 'timestamp';
+                time.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                div.appendChild(time);
+
+                this.chatMessages.appendChild(div);
+                this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+            }
+        }
+
+        window.ragClient = new RAGClient();
+    </script>
+</body>
+
+</html>

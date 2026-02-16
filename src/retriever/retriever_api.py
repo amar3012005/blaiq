@@ -11,13 +11,16 @@ Endpoints:
 """
 
 import os
+import json
 import time
 from typing import Any, Dict, List, Optional
 
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+import asyncio
 
 from utils.auth import verify_api_key
 from utils.job_store import JobStore
@@ -27,6 +30,7 @@ from .graphrag_retriever import (
 )
 from .graphrag_retriever import (
     generate_answer as graphrag_generate_answer,
+    generate_answer_stream as graphrag_generate_answer_stream,
 )
 from .rag_retriever import (
     RAGRetriever,
@@ -119,6 +123,12 @@ class QueryRequest(BaseModel):
         description="Graph traversal depth (1 = direct connections, 2 = 2 hops). Max 3.",
         ge=1,
         le=3,
+    )
+    
+    # 260215-BundB Jun - Add history support
+    history: Optional[List[Dict[str, Any]]] = Field(
+        default=[],
+        description="Conversation history list of messages [{'role': 'user', 'content': '...'}, ...]"
     )
 
 
@@ -517,7 +527,7 @@ async def query_graphrag(request: QueryRequest):
         answer = graphrag_generate_answer(
             request.query,
             chunks,
-            system_prompt=request.system_prompt,
+            system_prompt=request.system_prompt or retriever.response_generator_prompt,
             user_prompt=request.user_prompt,
         )
         answer_time = time.time() - answer_start
@@ -564,6 +574,174 @@ async def query_graphrag(request: QueryRequest):
                 retriever.close()
             except Exception:
                 pass  # Ignore close errors
+
+
+# ============================================================================
+# GraphRAG Streaming Endpoint
+# ============================================================================
+
+
+@app.post("/query/graphrag/stream")
+async def query_graphrag_stream(request: QueryRequest):
+    """
+    GraphRAG Query (Streaming) - Server-Sent Events (SSE).
+    
+    Yields events:
+    - retrieval_status: {"step": "init", ...}
+    - retrieval_result: {"chunks_count": 5, "stats": ...}
+    - graph_data: {"mermaid_code": ...} (optional)
+    - token: {"content": "The"}
+    - error: {"message": "..."}
+    - done: {"total_time": ...}
+    """
+    if not request.query.strip():
+        raise HTTPException(400, "Query cannot be empty")
+
+    async def event_generator():
+        retriever = None
+        start_time = time.time()
+        
+        try:
+            # 1. Notify Start
+            yield f"event: retrieval_status\ndata: {json.dumps({'step': 'starting', 'query': request.query})}\n\n"
+            
+            # 2. Initialize Retriever
+            retriever = GraphRAGRetriever(
+                debug=request.debug,
+                qdrant_url=request.qdrant_url,
+                qdrant_host=request.qdrant_host,
+                qdrant_port=request.qdrant_port,
+                qdrant_api_key=request.qdrant_api_key,
+                collection_name=request.collection_name,
+                entity_extraction_prompt=request.entity_extraction_prompt,
+            )
+            
+            # Helper to stream status updates
+            async def status_updater(status):
+                # status is dict {"step": str, "details": str}
+                await queue.put(f"event: retrieval_status\ndata: {json.dumps(status)}\n\n")
+
+            # 3. Perform Retrieval
+            retrieval_start = time.time()
+            # We use a Queue to bridge the callback to the generator stream
+            # But here we are inside the generator, so we can yield directly? NO.
+            # Generator methods are tricky. 
+            # Best way: Use the callback to just yield? 'yield' is not allowed in nested function.
+            # We can use a shared list or queue, but since we await the retrieval, we can't yield concurrently unless we run retrieval in background task.
+            
+            # OPTION 2: Passed callback simply prints for now? NO, user wants to see it.
+            # We must run retrieval in a Task and consume a Queue.
+            
+            queue = asyncio.Queue()
+            
+            async def run_retrieval():
+                try:
+                    chunks, stats = await retriever.graphrag_retrieval_async(
+                        request.query, k=request.k, debug=request.debug, status_callback=status_updater
+                    )
+                    await queue.put({"type": "result", "chunks": chunks, "stats": stats})
+                except Exception as e:
+                    await queue.put({"type": "error", "error": str(e)})
+                finally:
+                    await queue.put(None) # Sentinel
+
+            # Start background task
+            asyncio.create_task(run_retrieval())
+
+            chunks = []
+            stats = {}
+            
+            # Consume queue
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                
+                if isinstance(item, str):
+                    # It's an SSE event string from status_updater
+                    yield item
+                elif isinstance(item, dict):
+                    if "type" in item:
+                        if item["type"] == "error":
+                             yield f"event: error\ndata: {json.dumps({'message': item['error']})}\n\n"
+                             return
+                        elif item["type"] == "result":
+                             chunks = item["chunks"]
+                             stats = item["stats"]
+            
+            retrieval_time = time.time() - retrieval_start
+            
+            if not chunks:
+                 yield f"event: error\ndata: {json.dumps({'message': 'No relevant chunks found'})}\n\n"
+                 return
+            
+            # 4. Stream Retrieval Results
+            yield f"event: retrieval_result\ndata: {json.dumps({'chunks_count': len(chunks), 'retrieval_time': round(retrieval_time, 2), 'stats': stats})}\n\n"
+            
+            # 5. Graph Visualization (Optional)
+            if request.include_graph:
+                try:
+                    entities_extracted = stats.get("entities_extracted", [])
+                    graph_result = retriever.get_graph_visualization(
+                        entities=entities_extracted, depth=request.graph_depth
+                    )
+                    if graph_result:
+                         # Serialize graph data - reusing Pydantic models via dict()
+                         graph_data = GraphVisualization(
+                            mermaid_code=graph_result["mermaid_code"],
+                            nodes=graph_result["nodes"],
+                            edges=graph_result["edges"],
+                            entities=[
+                                GraphEntity(id=e["id"], name=e["name"], type=e["type"])
+                                for e in graph_result["entities"]
+                            ],
+                            relationships=[
+                                GraphRelationship(
+                                    source_id=r["source_id"], target_id=r["target_id"], type=r["type"]
+                                )
+                                for r in graph_result["relationships"]
+                            ],
+                        ).dict()
+                         yield f"event: graph_data\ndata: {json.dumps(graph_data)}\n\n"
+                except Exception as e:
+                    yield f"event: error\ndata: {json.dumps({'message': f'Graph viz failed: {str(e)}'})}\n\n"
+
+            # 6. Stream Answer Generation
+            if request.generate_answer:
+                if not os.getenv("OPENAI_API_KEY"):
+                     yield f"event: error\ndata: {json.dumps({'message': 'OPENAI_API_KEY not configured'})}\n\n"
+                     return
+
+                # Assuming retriever.response_generator_prompt is available
+                system_prompt = request.system_prompt or retriever.response_generator_prompt
+                
+                stream = graphrag_generate_answer_stream(
+                    request.query,
+                    chunks,
+                    history=request.history, 
+                    system_prompt=system_prompt,
+                    user_prompt=request.user_prompt,
+                )
+                
+                # Iterate over LiteLLM/OpenAI stream
+                for chunk in stream:
+                    content = chunk.choices[0].delta.content
+                    if content:
+                         yield f"event: token\ndata: {json.dumps({'content': content})}\n\n"
+            
+            total_time = time.time() - start_time
+            yield f"event: done\ndata: {json.dumps({'total_time': round(total_time, 2)})}\n\n"
+
+        except Exception as e:
+            yield f"event: error\ndata: {json.dumps({'message': str(e)})}\n\n"
+        finally:
+            if retriever:
+                try:
+                    retriever.close()
+                except:
+                    pass
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 # ============================================================================

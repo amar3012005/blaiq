@@ -51,7 +51,7 @@ retriever_job_store = JobStore(storage_dir="_jobs", api_name="retriever")
 class QueryRequest(BaseModel):
     """Query request model"""
     query: str = Field(..., description="Your question", min_length=1)
-    k: int = Field(default=20, description="Number of chunks to retrieve", ge=1)
+    k: int = Field(default=15, description="Number of chunks to retrieve", ge=1)
     debug: bool = Field(default=False, description="Enable debug mode")
     generate_answer: bool = Field(default=True, description="Generate LLM answer")
     system_prompt: Optional[str] = Field(default=None, description="Custom system prompt")
@@ -77,6 +77,9 @@ class QueryRequest(BaseModel):
     
     # Session management
     session_id: Optional[str] = Field(default=None, description="Unique session ID for conversation history")
+    
+    # Content format control
+    content_mode: Optional[str] = Field(default="DEFAULT", description="Specialized content mode (EMAIL, TABLE, INVOICE)")
 
 
 class QueryResponse(BaseModel):
@@ -338,102 +341,85 @@ async def query_graphrag_optimized(request: QueryRequest):
     # Cache miss - perform retrieval
     retriever = None
     async_wrapper = None
-    
+
     try:
-        # Get shared or specialized retriever
         retriever = get_shared_retriever(request)
-        retriever.debug = request.debug # Sync debug flag
-        
-        # Wrap for async execution
+        retriever.debug = request.debug
         async_wrapper = AsyncRetriever(retriever)
-        
+
         retrieval_start = time.time()
-        
-        # Stage 1: Query expansion (fast, synchronous)
-        exp_start = time.time()
-        expanded_query = retriever.expand_query_with_cot(request.query)
-        exp_time = time.time() - exp_start
-        logger.info(f"⏱️ Query Expansion: {exp_time:.3f}s")
-        
-        # Stage 2: Entity extraction (LLM call, ~300ms)
-        ent_start = time.time()
-        entities = retriever.extract_entities_with_llm(request.query)
-        ent_time = time.time() - ent_start
-        logger.info(f"⏱️ Entity Extraction: {ent_time:.3f}s")
-        
-        # Stage 3: PARALLEL retrieval (Vector + Graph + Keyword)
+
+        # ── Unified Planner (1 LLM call: intent + entities + keywords) ──
+        plan_start = time.time()
+        plan = retriever.plan_retrieval(request.query)
+        logger.info(f"⏱️ Unified Planning: {time.time() - plan_start:.3f}s")
+
+        search_plan = plan.get("search_plan", {})
+        entities = plan.get("entities", [])
+        keywords = plan.get("keywords", [])
+
+        # Build expanded_query from planner keywords (no separate LLM call)
+        expanded_query = {
+            "original": request.query,
+            "keywords": keywords,
+            "numbers": [k for k in keywords if any(c.isdigit() for c in k)],
+            "years": [], "percentages": [], "expected_patterns": [],
+        }
+
+        # ── Parallel Retrieval ──
         broad_k = request.k * 10
         rank_start = time.time()
-        rankings, timings = await async_wrapper.parallel_retrieval(
-            request.query,
-            entities,
-            expanded_query,
-            broad_k
+        rankings, timings, special_results = await async_wrapper.parallel_retrieval(
+            request.query, entities, expanded_query, broad_k, plan=search_plan
         )
-        rank_time = time.time() - rank_start
-        logger.info(f"⏱️ Parallel Retrieval: {rank_time:.3f}s (Breakdown: {timings})")
-        
-        # Stage 4: Adjacent chunks (fast)
-        adj_start = time.time()
+        logger.info(f"⏱️ Parallel Retrieval: {time.time() - rank_start:.3f}s (Breakdown: {timings})")
+
+        # Adjacent chunks
         all_top = []
-        if "graph" in rankings:
-            all_top.extend(list(rankings["graph"].keys())[:10])
-        all_top.extend(list(rankings["vector"].keys())[:10])
-        all_top.extend(list(rankings["keyword"].keys())[:10])
+        for r_dict in rankings.values():
+            all_top.extend(list(r_dict.keys())[:10])
         all_top = list(set(all_top[:30]))
-        
-        adjacent_results = retriever.get_adjacent_chunks(all_top[:20], window_size=1)
-        if adjacent_results:
-            rankings["adjacent"] = adjacent_results
-        adj_time = time.time() - adj_start
-        logger.info(f"⏱️ Adjacent Fetch: {adj_time:.3f}s")
-        
-        # Stage 5: RRF Fusion
-        fusion_start = time.time()
+        if all_top:
+            adjacent_results = retriever.get_adjacent_chunks(all_top[:20], window_size=1)
+            if adjacent_results:
+                rankings["adjacent"] = adjacent_results
+
+        # RRF Fusion
         if "graph" in rankings and rankings["graph"]:
             weights = {"graph": 0.40, "vector": 0.45, "keyword": 0.10, "adjacent": 0.05}
         else:
             weights = {"vector": 0.70, "keyword": 0.25, "adjacent": 0.05}
-        
         fused_results = retriever.weighted_rrf_fusion(rankings, weights=weights, k=60)
-        fusion_time = time.time() - fusion_start
-        logger.info(f"⏱️ RRF Fusion: {fusion_time:.3f}s")
-        
-        # Stage 5.5: Reranking (Elite Status Accuracy)
-        rerank_start = time.time()
-        
-        # Check global and request-specific flag
+
+        # Reranking
+        rerank_time = 0.0
         global_reranker_enabled = os.getenv("ENABLE_RERANKER", "true").lower() == "true"
-        
         if request.use_reranker and global_reranker_enabled:
-            # First, fetch candidate documents to rerank
+            rerank_start = time.time()
             candidates = retriever._retrieve_chunks(fused_results[:request.rerank_top_k])
             if candidates:
                 reranker = get_reranker()
-                reranked_docs = reranker.rerank(request.query, candidates, top_n=request.k)
-                chunks = reranked_docs
-                logger.info(f"🎯 Reranked {len(candidates)} candidates into {len(chunks)} final chunks")
+                chunks = reranker.rerank(request.query, candidates, top_n=request.k)
             else:
                 chunks = retriever._retrieve_chunks(fused_results[:request.k])
+            rerank_time = time.time() - rerank_start
         else:
-            # Stage 6: Retrieve final chunks (standard)
             chunks = retriever._retrieve_chunks(fused_results[:request.k])
-        
-        rerank_time = time.time() - rerank_start
+
         retrieval_time = time.time() - retrieval_start
-        logger.info(f"🚀 TOTAL Retrieval Time: {retrieval_time:.3f}s")
-        
+        logger.info(f"🚀 TOTAL Retrieval: {retrieval_time:.3f}s")
+
         if not chunks:
             raise HTTPException(404, "No relevant chunks found")
-        
-        # Generate answer if requested
+
+        # ── Answer Generation (with integrated formatting) ──
         answer = ""
         answer_time = 0.0
-        
+
         if request.generate_answer:
             if not os.getenv("OPENAI_API_KEY"):
                 raise HTTPException(500, "OPENAI_API_KEY not configured")
-            
+
             answer_start = time.time()
             answer = generate_answer(
                 request.query,
@@ -442,10 +428,9 @@ async def query_graphrag_optimized(request: QueryRequest):
                 user_prompt=request.user_prompt,
             )
             answer_time = time.time() - answer_start
-        
+
         total_time = time.time() - total_start
-        
-        # Build response
+
         stats = {
             "total_candidates": len(fused_results),
             "graph_chunks": len(rankings.get("graph", {})),
@@ -453,10 +438,10 @@ async def query_graphrag_optimized(request: QueryRequest):
             "keyword_chunks": len(rankings.get("keyword", {})),
             "entities_extracted": entities,
             "parallel_timings": timings,
-            "rerank_time": round(rerank_time, 3) if request.use_reranker else 0,
+            "rerank_time": round(rerank_time, 3),
             "filter_label": retriever.filter_label,
         }
-        
+
         result = {
             "query": request.query,
             "answer": answer,
@@ -468,32 +453,12 @@ async def query_graphrag_optimized(request: QueryRequest):
             "cached": False,
             "cache_stats": cache_manager.get_stats()
         }
-        
-        # Cache result
+
         if request.use_cache:
-            await cache_manager.set(
-                request.query,
-                result,
-                request.collection_name
-            )
-        
-        # Log job
-        job_id = f"graphrag_{int(time.time() * 1000)}"
-        retriever_job_store.save_job(
-            job_id,
-            {
-                "status": "completed",
-                "created_at": time.time(),
-                "mode": "graphrag_optimized",
-                "query": request.query,
-                "chunks_retrieved": len(chunks),
-                "total_time": total_time,
-                "cached": False,
-            },
-        )
-        
+            await cache_manager.set(request.query, result, request.collection_name)
+
         return QueryResponse(**result)
-    
+
     except HTTPException:
         raise
     except Exception as e:
@@ -501,11 +466,6 @@ async def query_graphrag_optimized(request: QueryRequest):
     finally:
         if async_wrapper:
             async_wrapper.shutdown()
-        # We DO NOT close the retriever here as it's shared
-        # try:
-        #     retriever.close()
-        # except Exception:
-        #     pass
 
 
 # ============================================================================
@@ -560,130 +520,143 @@ async def query_graphrag_stream(request_data: QueryRequest, http_request: Reques
 
     async def stream_generator():
         total_start = time.time()
-        
-        # 2. Load History for Context
+
+        # ── 1. Load History ──
         history_str = ""
         past_messages = []
         if request_data.session_id:
-            # User requested last 4 turns (8 messages) to optimize prompt size
             logger.info(f"📜 Loading history for session: {request_data.session_id} (Tenant: {tenant_collection})")
             past_messages = await session_manager.get_history(tenant_collection, request_data.session_id, limit=8)
             for msg in past_messages:
                 history_str += f"{msg['role'].upper()}: {msg['content']}\n"
-            
-            # Save user query to history immediately
             await session_manager.add_message(tenant_collection, request_data.session_id, "user", request_data.query)
 
         metrics = {
             "timings": {},
-            "sources": {"qdrant_vector": 0, "graph_rag": 0, "keyword_bm25": 0, "adjacent": 0},
+            "sources": {"vector": 0, "graph": 0, "keyword": 0},
             "chunks_retrieved": 0,
             "tenant": tenant_collection
         }
-        
-        # 3. Enhance Query with History (Contextual Rewriting)
-        yield f"data: {json.dumps({'log': '🧠 Contextualizing query with history...'})}\n\n"
+
         retriever = get_shared_retriever(request_data)
         async_wrapper = AsyncRetriever(retriever)
-        
+
+        # ── 2. Query Rewrite (conditional, no LLM if not context-dependent) ──
         context_query = retriever.rewrite_query(request_data.query, history_str)
         if context_query != request_data.query:
-            logger.info(f"🔄 Contextual Rewriting: '{request_data.query}' -> '{context_query}'")
+            logger.info(f"🔄 Rewrite: '{request_data.query}' -> '{context_query}'")
 
-        # LOGGING: History & Intent
-        log_history = [
-            {"role": m["role"], "content": m["content"][:200] + "..." if len(m["content"]) > 200 else m["content"]}
-            for m in past_messages[-4:]
-        ]
+        # Fast path for greetings
+        if is_conversational(request_data.query) and not history_str:
+            yield f"data: {json.dumps({'answer': 'Hallo! Ich bin BLAIQ, Ihr strategischer Wissenspartner. Wie kann ich Ihnen helfen?'})}\n\n"
+            yield f"data: {json.dumps({'metrics': metrics})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
 
-        # 3b. Strategic Planning
-        yield f"data: {json.dumps({'log': '🎯 Strategic Planning (Gemini)...'})}\n\n"
+        # ── 3. UNIFIED PLANNER (1 LLM call: intent + entities + keywords) ──
+        yield f"data: {json.dumps({'log': '🎯 Strategic Planning...'})}\n\n"
+        plan_start = time.time()
         plan = retriever.plan_retrieval(context_query)
+        metrics["timings"]["planning"] = round(time.time() - plan_start, 3)
+
         search_plan = plan.get("search_plan", {})
+        entities = plan.get("entities", [])
+        keywords = plan.get("keywords", [])
+
         yield f"data: {json.dumps({'planning': plan})}\n\n"
-        
-        log_payload = {
+
+        logger.info(json.dumps({
             "event": "pipeline_start",
             "session_id": request_data.session_id,
             "query": request_data.query,
             "rewritten_query": context_query,
-            "history_context": log_history,
             "timestamp": time.time(),
             "intent": plan.get("mode", "UNKNOWN"),
-            "planner_routes": search_plan
-        }
-        logger.info(json.dumps(log_payload, indent=2, ensure_ascii=False))
+            "planner_routes": search_plan,
+            "entities": entities,
+            "keywords": keywords[:8]
+        }, indent=2, ensure_ascii=False))
 
-        # Fast Path check
-        if is_conversational(request_data.query) and not history_str:
-            yield f"data: {json.dumps({'answer': 'Hello! I am your Enterprise Knowledge Hive. How can I help you today?'})}\n\n"
+        # Handle SMALL_TALK from planner
+        if plan.get("mode") == "SMALL_TALK":
+            reply = plan.get("direct_reply") or "Hallo! Wie kann ich Ihnen helfen?"
+            yield f"data: {json.dumps({'delta': reply})}\n\n"
             yield f"data: {json.dumps({'metrics': metrics})}\n\n"
             yield "data: [DONE]\n\n"
             return
-        
-        # Stage 1-4: Planned Retrieval
-        
-        # Only expand query if vector/keyword is needed (skip for pure graph or hivemind)
-        expanded_query = {}
-        if search_plan.get("use_vector") or search_plan.get("use_keyword"):
-            yield f"data: {json.dumps({'log': '✨ Expanding query with CoT...'})}\n\n"
-            expand_start = time.time()
-            expanded_query = retriever.expand_query_with_cot(context_query)
-            metrics["timings"]["query_expansion"] = round(time.time() - expand_start, 3)
-        
-        # Only extract entities if graph search is enabled
-        entities = []
-        if search_plan.get("use_graph"):
-            yield f"data: {json.dumps({'log': '🔍 Extracting entities for Graph traversal...'})}\n\n"
-            entity_start = time.time()
-            entities = retriever.extract_entities_with_llm(context_query)
-            metrics["timings"]["entity_extraction"] = round(time.time() - entity_start, 3)
-        
-        yield f"data: {json.dumps({'log': f'🚀 Parallel Retrieval ({sum(search_plan.values())} sources)...'})}\n\n"
+
+        # ── 4. Build expanded_query from planner keywords (NO separate LLM call) ──
+        expanded_query = {
+            "original": context_query,
+            "keywords": keywords,
+            "numbers": [k for k in keywords if any(c.isdigit() for c in k)],
+            "years": [],
+            "percentages": [],
+            "expected_patterns": [],
+        }
+
+        # ── 5. PARALLEL RETRIEVAL (vector + graph + keyword) ──
+        active_sources = sum(1 for v in [search_plan.get("use_vector"), search_plan.get("use_graph"), search_plan.get("use_keyword")] if v)
+        yield f"data: {json.dumps({'log': f'🚀 Parallel Retrieval ({active_sources} sources)...'})}\n\n"
+
         retrieval_start = time.time()
         rankings, timings, special_results = await async_wrapper.parallel_retrieval(
             context_query, entities, expanded_query, request_data.k * 20,
             plan=search_plan
         )
-        
+
         metrics["sources"] = {k: len(v) for k, v in rankings.items()}
         metrics["timings"]["parallel_retrieval"] = timings
 
         fused_results = retriever.weighted_rrf_fusion(rankings, k=60)
         chunks = retriever._retrieve_chunks(fused_results[:request_data.k])
-        
-        # 🐝 Inject HiveMind Summary if available
+
+        # Inject HiveMind if available
         if special_results.get("hive_mind"):
-            logger.info("🐝 Including HiveMind Global Summary in context")
+            logger.info("🐝 Including HiveMind Global Summary")
             hive_doc = Document(
-                page_content=f"*** HIVE MIND INTELLIGENCE (GLOBAL SUMMARY) ***\n{special_results['hive_mind']}",
-                metadata={"source": "HiveMind Global Analysis", "score": 1.0, "is_hive_mind": True}
+                page_content=f"*** HIVE MIND INTELLIGENCE ***\n{special_results['hive_mind']}",
+                metadata={"source": "HiveMind", "score": 1.0, "is_hive_mind": True}
             )
             chunks.insert(0, hive_doc)
-            
+
         metrics["chunks_retrieved"] = len(chunks)
         metrics["timings"]["total_retrieval"] = round(time.time() - retrieval_start, 3)
 
-        yield f"data: {json.dumps({'log': f'✅ Retrieval complete ({len(chunks)} chunks found).'})}\n\n"
-        yield f"data: {json.dumps({'log': '🧬 Synthesizing conscious response...'})}\n\n"
-        
-        # Start streaming Response
+        retrieval_ms = round(metrics["timings"]["total_retrieval"] * 1000)
+        yield f"data: {json.dumps({'log': f'✅ Retrieved {len(chunks)} chunks in {retrieval_ms}ms'})}\n\n"
+
+        # ── 6. ANSWER GENERATION with integrated formatting (1 LLM call) ──
+        yield f"data: {json.dumps({'log': '🧬 Generating response...'})}\n\n"
+
         llm_start = time.time()
         first_token_time = None
-        from retriever.graphrag_retriever import generate_answer_stream
-        
-        # 5. Generate Answer (Stream)
-        log_llm_event("llm_start", {"model": retriever.post_model})
         final_answer = ""
-        
+
+        from retriever.graphrag_retriever import generate_answer_stream
+
+        # Load formatting template if content_mode is set
+        content_mode = request_data.content_mode
+        format_template = None
+        if content_mode and content_mode.upper() != "DEFAULT":
+            format_template = retriever.loader.load_template(content_mode)
+            if format_template:
+                logger.info(f"📋 Injecting {content_mode.upper()} template into response generation")
+            else:
+                logger.warning(f"⚠️ Template for '{content_mode}' not found, using default format")
+
+        log_llm_event("llm_start", {"model": retriever.post_model})
+
         response_stream = generate_answer_stream(
-            context_query,  # Use Context Query for accurate answer generation
-            chunks, 
+            context_query,
+            chunks,
             history=past_messages,
             model=retriever.post_model,
-            system_prompt=retriever.response_generator_prompt  # Use new BLAIQ Persona
+            system_prompt=retriever.response_generator_prompt,
+            content_mode=content_mode,
+            format_template=format_template,
         )
-        
+
         for chunk in response_stream:
             if chunk.choices[0].delta.content:
                 if first_token_time is None:
@@ -691,25 +664,24 @@ async def query_graphrag_stream(request_data: QueryRequest, http_request: Reques
                 content = chunk.choices[0].delta.content
                 final_answer += content
                 yield f"data: {json.dumps({'delta': content})}\n\n"
-        
-        # 4. Save Assistant Response to History
+
+        # ── 7. Save to History ──
         if request_data.session_id:
             await session_manager.add_message(tenant_collection, request_data.session_id, "assistant", final_answer)
 
+        # ── 8. Metrics ──
         metrics["timings"]["llm_generation"] = round(time.time() - llm_start, 3)
         metrics["timings"]["total"] = round(time.time() - total_start, 3)
-        
         if first_token_time:
-            metrics["timings"]["ttfc_ms"] = (first_token_time - llm_start) * 1000
+            metrics["timings"]["ttfc_ms"] = round((first_token_time - llm_start) * 1000, 1)
 
-        # LOGGING: LLM Response & Latency
         logger.info(json.dumps({
             "event": "llm_complete",
             "response_length": len(final_answer),
-            "total_latency_ms": metrics["timings"]["total"] * 1000,
-            "llm_latency_ms": metrics["timings"]["llm_generation"] * 1000,
+            "total_latency_ms": round(metrics["timings"]["total"] * 1000),
+            "llm_latency_ms": round(metrics["timings"]["llm_generation"] * 1000),
             "ttfc_ms": metrics["timings"].get("ttfc_ms", 0),
-            "retrieval_latency_ms": metrics["timings"]["total_retrieval"] * 1000,
+            "retrieval_latency_ms": round(metrics["timings"]["total_retrieval"] * 1000),
             "timestamp": time.time()
         }, indent=2))
 

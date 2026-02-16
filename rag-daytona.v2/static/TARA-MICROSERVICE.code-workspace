@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "../../../../leibniz_agent/TARA-MICROSERVICE"
+		},
+		{
+			"path": "../../orchestra_daytona.v2"
+		},
+		{
+			"path": ".."
+		}
+	],
+	"settings": {}
+}

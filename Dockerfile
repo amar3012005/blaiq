@@ -33,11 +33,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     pyyaml \
     sentence-transformers \
     pydantic \
-    litellm \
+    groq \
     torch \
     "optimum[onnxruntime]" \
     onnx \
-    onnxruntime-tools
+    onnxruntime-tools \
+    requests
 
 # ============================================================================
 # Runtime Stage

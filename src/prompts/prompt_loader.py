@@ -37,3 +37,12 @@ class PromptLoader:
     def load_response_generator(self) -> str:
         """Returns the content for the Final BLAIQ Persona."""
         return self.get_prompt_content("response_generator")
+
+    def load_template(self, template_name: str) -> str:
+        """Loads a specific formatting template from the templates/ directory."""
+        path = os.path.join(self.prompt_dir, "templates", f"{template_name.lower()}_formatter.xml")
+        if not os.path.exists(path):
+            return ""
+            
+        with open(path, "r") as f:
+            return f.read()
