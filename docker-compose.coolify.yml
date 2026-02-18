@@ -36,7 +36,7 @@ services:
       dockerfile: Dockerfile
     # container_name: graphrag-optimized-e0cwcccswckc8okk4k00skck
     ports:
-      - "${HOST_PORT:-8020}:8001" # Allow overriding the host port via environment variable (default 8020)
+      - "${HOST_PORT:-8030}:8001" # Allow overriding the host port via environment variable (default 8020)
     volumes:
       # Persistent data directories
       - graphrag_optimized_data:/app/data
